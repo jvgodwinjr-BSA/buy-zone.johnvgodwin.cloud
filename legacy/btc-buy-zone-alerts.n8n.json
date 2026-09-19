@@ -1,0 +1,154 @@
+{
+  "name": "BTC Buy-Zone Alerts (Crypto Lifer Framework)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 4
+            }
+          ]
+        }
+      },
+      "id": "a1000000-0000-0000-0000-000000000001",
+      "name": "Every 4 Hours",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "url": "https://api.alternative.me/fng/?limit=1",
+        "options": {}
+      },
+      "id": "a1000000-0000-0000-0000-000000000002",
+      "name": "Fear & Greed",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "url": "https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=365",
+        "options": {}
+      },
+      "id": "a1000000-0000-0000-0000-000000000003",
+      "name": "Daily Klines",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [440, 0]
+    },
+    {
+      "parameters": {
+        "url": "https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=4h&limit=300",
+        "options": {}
+      },
+      "id": "a1000000-0000-0000-0000-000000000004",
+      "name": "4H Klines",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [660, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== BTC Buy-Zone scoring — ported from btc-buy-zone-gauge.html =====\n// Alerts ONLY on state transitions (dedup via workflow static data).\n\nconst fngData = $('Fear & Greed').first().json;\nconst dailyK = $('Daily Klines').all().map(i => i.json);\nconst h4K = $('4H Klines').all().map(i => i.json);\n\n// Binance klines: each row = [openTime, open, high, low, close, ...]. n8n may deliver\n// rows as items (json per row) or one item containing the whole array — handle both.\nconst rows = (k) => (Array.isArray(k[0]) ? k : (k.length === 1 && Array.isArray(k[0].data) ? k[0].data : k.map(r => Object.values(r))));\nconst dailyCloses = rows(dailyK).map(r => parseFloat(r[4]));\nconst h4Closes = rows(h4K).map(r => parseFloat(r[4]));\n\nconst fng = parseInt(fngData.data[0].value, 10);\nconst fngLabel = fngData.data[0].value_classification;\nconst price = dailyCloses[dailyCloses.length - 1];\n\n// ---------- helpers ----------\nconst avg = a => a.reduce((x, y) => x + y, 0) / a.length;\nfunction ema(a, n) { const k = 2 / (n + 1); let e = avg(a.slice(0, n)); for (let i = n; i < a.length; i++) e = a[i] * k + e * (1 - k); return e; }\nfunction weeklyStochRSI(daily) {\n  const wk = []; for (let i = daily.length - 1; i >= 0; i -= 7) wk.unshift(daily[i]);\n  const n = 14, out = []; let ag = 0, al = 0;\n  for (let i = 1; i <= n; i++) { const c = wk[i] - wk[i - 1]; ag += Math.max(c, 0); al += Math.max(-c, 0); }\n  ag /= n; al /= n; out.push(100 - 100 / (1 + (al ? ag / al : 1e9)));\n  for (let i = n + 1; i < wk.length; i++) {\n    const c = wk[i] - wk[i - 1];\n    ag = (ag * (n - 1) + Math.max(c, 0)) / n; al = (al * (n - 1) + Math.max(-c, 0)) / n;\n    out.push(100 - 100 / (1 + (al ? ag / al : 1e9)));\n  }\n  const rec = out.slice(-14), lo = Math.min(...rec), hi = Math.max(...rec);\n  return hi > lo ? (out[out.length - 1] - lo) / (hi - lo) * 100 : 50;\n}\n\n// ---------- Panel 1: accumulation score ----------\nconst ma200 = avg(dailyCloses.slice(-200));\nconst ema21d = ema(dailyCloses, 21);\nconst stoch = weeklyStochRSI(dailyCloses);\nconst fngScore = fng <= 5 ? 100 : fng <= 10 ? 92 : fng <= 20 ? 75 : fng <= 30 ? 60 : fng <= 45 ? 42 : fng <= 60 ? 28 : fng <= 75 ? 15 : 5;\nconst stochScore = 100 - stoch;\nconst vs200 = (price - ma200) / ma200 * 100;\nconst maScore = vs200 <= -20 ? 100 : vs200 <= -10 ? 85 : vs200 <= 0 ? 70 : vs200 <= 10 ? 50 : vs200 <= 25 ? 30 : 12;\nconst vs21 = (price - ema21d) / ema21d * 100;\nconst emaScore = vs21 <= 0 ? 85 : vs21 <= 3 ? 70 : vs21 <= 8 ? 45 : vs21 <= 15 ? 25 : 10;\nconst score = Math.round(fngScore * 0.40 + stochScore * 0.30 + maScore * 0.15 + emaScore * 0.15);\nconst zoneOf = s => s >= 80 ? 'DEPLOY' : s >= 60 ? 'STRONG_BUY' : s >= 40 ? 'NEUTRAL' : 'EXTENDED';\nconst zone = zoneOf(score);\n\n// ---------- Panel 2: trade setup per timeframe ----------\nfunction tfSetup(closes) {\n  const p = closes[closes.length - 1];\n  const m200 = avg(closes.slice(-200));\n  const e21 = ema(closes, 21);\n  const above200 = p > m200;\n  const emaAbove = e21 > m200;\n  const dist21 = (p - e21) / e21 * 100;\n  const mingling = Math.abs(dist21) <= 1.5;\n  const spread = Math.abs(e21 - m200) / m200 * 100;\n  return { setup: above200 && emaAbove && mingling, compressed: spread < 5, above200, dist21: dist21.toFixed(1), spread: spread.toFixed(1) };\n}\nconst d = tfSetup(dailyCloses.slice(-260));\nconst h = tfSetup(h4Closes);\nconst setupState = d.setup && h.setup ? 'BOTH' : d.setup ? 'DAILY' : h.setup ? 'H4' : 'NONE';\n\n// ---------- transition detection (dedup) ----------\nconst sd = $getWorkflowStaticData('global');\nconst prev = sd.btcAlerts || { zone: null, setupState: null, fngExtreme: false };\nconst alerts = [];\nconst px = '$' + Math.round(price).toLocaleString('en-US');\n\nif (zone !== prev.zone && prev.zone !== null) {\n  const up = ['EXTENDED', 'NEUTRAL', 'STRONG_BUY', 'DEPLOY'];\n  const improving = up.indexOf(zone) > up.indexOf(prev.zone);\n  if (zone === 'DEPLOY') alerts.push({ priority: 'max', tags: 'rotating_light,moneybag', title: 'BTC: DEPLOY RESERVES ZONE', msg: `Accumulation score ${score}/100 — max-fear zone. F&G ${fng} (${fngLabel}), stochRSI ${stoch.toFixed(0)}, price ${px} (${vs200.toFixed(1)}% vs 200d MA).` });\n  else if (zone === 'STRONG_BUY') alerts.push({ priority: 'high', tags: 'chart_with_downwards_trend,moneybag', title: 'BTC: Strong Buy Zone ' + (improving ? 'entered' : '(pulled back from Deploy)'), msg: `Accumulation score ${score}/100. F&G ${fng} (${fngLabel}), price ${px}.` });\n  else alerts.push({ priority: 'default', tags: 'information_source', title: `BTC zone: ${prev.zone} → ${zone}`, msg: `Accumulation score ${score}/100. F&G ${fng}, price ${px}.` });\n}\n\nconst fngExtreme = fng <= 10;\nif (fngExtreme && !prev.fngExtreme) {\n  alerts.push({ priority: 'max', tags: 'scream', title: 'BTC: Fear & Greed \\u2264 10', msg: `F&G hit ${fng} (${fngLabel}) — framework extreme-fear trigger. Check 2-week stochRSI (currently ${stoch.toFixed(0)}) for confluence. Price ${px}.` });\n}\n\nif (setupState !== prev.setupState && prev.setupState !== null && setupState !== 'NONE') {\n  const pr = setupState === 'BOTH' ? 'max' : 'high';\n  const label = setupState === 'BOTH' ? 'SETUP ON DAILY + 4H' : `Setup on ${setupState === 'H4' ? '4H' : 'Daily'} only (reduced size)`;\n  alerts.push({ priority: pr, tags: 'dart', title: 'BTC trade: ' + label, msg: `21EMA+200MA conditions met. Daily: ${d.setup ? 'SETUP' : 'no'}${d.compressed ? ' (compressed)' : ''}, dist21 ${d.dist21}%. 4H: ${h.setup ? 'SETUP' : 'no'}${h.compressed ? ' (compressed)' : ''}, dist21 ${h.dist21}%. Wait for candle-BODY close breakout before entry. Price ${px}.` });\n}\n\nsd.btcAlerts = { zone, setupState, fngExtreme };\n\nreturn alerts.length\n  ? alerts.map(a => ({ json: a }))\n  : [{ json: { priority: null, title: 'no-alert', msg: `score ${score} zone ${zone} setup ${setupState} fng ${fng}` } }];"
+      },
+      "id": "a1000000-0000-0000-0000-000000000005",
+      "name": "Score + Detect Transitions",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.priority }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a1000000-0000-0000-0000-000000000006",
+      "name": "Alert Needed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1100, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://ntfy.example.com/btc-alerts",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Title",
+              "value": "={{ $json.title }}"
+            },
+            {
+              "name": "Priority",
+              "value": "={{ $json.priority }}"
+            },
+            {
+              "name": "Tags",
+              "value": "={{ $json.tags }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "text/plain",
+        "body": "={{ $json.msg }}",
+        "options": {}
+      },
+      "id": "a1000000-0000-0000-0000-000000000007",
+      "name": "ntfy Push",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1320, -80]
+    }
+  ],
+  "connections": {
+    "Every 4 Hours": {
+      "main": [[{ "node": "Fear & Greed", "type": "main", "index": 0 }]]
+    },
+    "Fear & Greed": {
+      "main": [[{ "node": "Daily Klines", "type": "main", "index": 0 }]]
+    },
+    "Daily Klines": {
+      "main": [[{ "node": "4H Klines", "type": "main", "index": 0 }]]
+    },
+    "4H Klines": {
+      "main": [[{ "node": "Score + Detect Transitions", "type": "main", "index": 0 }]]
+    },
+    "Score + Detect Transitions": {
+      "main": [[{ "node": "Alert Needed?", "type": "main", "index": 0 }]]
+    },
+    "Alert Needed?": {
+      "main": [
+        [{ "node": "ntfy Push", "type": "main", "index": 0 }],
+        []
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

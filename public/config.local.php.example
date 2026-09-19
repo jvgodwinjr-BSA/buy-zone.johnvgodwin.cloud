@@ -1,0 +1,14 @@
+<?php
+// Copy to config.local.php (git-ignored) on the server and fill in real values.
+return [
+    'db' => [
+        'host'    => 'localhost',
+        'name'    => 'u123456_buyzone',
+        'user'    => 'u123456_buyzone',
+        'pass'    => 'CHANGE_ME',
+        'charset' => 'utf8mb4',
+    ],
+    // Shared secret n8n sends as "Authorization: Bearer <token>" to /api/*.
+    // Generate with: php -r 'echo bin2hex(random_bytes(32));'
+    'api_token' => 'CHANGE_ME_64_HEX_CHARS',
+];

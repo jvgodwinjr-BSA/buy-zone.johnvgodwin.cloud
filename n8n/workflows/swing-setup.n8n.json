@@ -1,0 +1,335 @@
+{
+  "name": "BuyZone — Swing Setup Collector",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "1,16,31,46 * * * *"
+            }
+          ]
+        }
+      },
+      "id": "b2000000-0000-4000-8000-000000000016",
+      "name": "Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "b2000000-0000-4000-8000-000000000018",
+              "name": "base_url",
+              "value": "https://buy-zone.johnvgodwin.cloud",
+              "type": "string"
+            },
+            {
+              "id": "b2000000-0000-4000-8000-000000000019",
+              "name": "ntfy_url",
+              "value": "https://ntfy.example.com/btc-alerts",
+              "type": "string"
+            },
+            {
+              "id": "b2000000-0000-4000-8000-000000000017",
+              "name": "binance_base",
+              "value": "https://api.binance.com",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b2000000-0000-4000-8000-000000000020",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Config').first().json.base_url }}/api/assets.php?class=crypto&swing=1",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "responseFormat": "json"
+            }
+          }
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "id": "b2000000-0000-4000-8000-000000000021",
+      "name": "Get Assets",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "'use strict';\n// Canonical indicator math for the Buy-Zone tracker.\n// n8n/build.js embeds this file verbatim into every workflow's Code node,\n// so this is the single source of truth: edit here, run `node n8n/build.js`.\n\nconst DAY_MS = 86400000;\nconst WEEK_MS = 7 * DAY_MS;\nconst WEEK_SHIFT_MS = 4 * DAY_MS; // 1970-01-05 was a Monday; Binance weekly candles open Monday 00:00 UTC\nconst MIN_BARS = 220;             // 200 for the MA plus EMA warm-up\n\nconst avg = a => a.reduce((x, y) => x + y, 0) / a.length;\nconst sma = (a, n) => avg(a.slice(-n));\n\nfunction ema(a, n) {\n  const k = 2 / (n + 1);\n  let e = avg(a.slice(0, n));\n  for (let i = n; i < a.length; i++) e = a[i] * k + e * (1 - k);\n  return e;\n}\n\n// Wilder RSI, SMA-seeded, identical to TradingView's ta.rsi (ta.rma smoothing).\nfunction rsiSeries(closes, n) {\n  if (closes.length <= n) return [];\n  let ag = 0, al = 0;\n  for (let i = 1; i <= n; i++) { const c = closes[i] - closes[i - 1]; ag += Math.max(c, 0); al += Math.max(-c, 0); }\n  ag /= n; al /= n;\n  const out = [rsiValue(ag, al)];\n  for (let i = n + 1; i < closes.length; i++) {\n    const c = closes[i] - closes[i - 1];\n    ag = (ag * (n - 1) + Math.max(c, 0)) / n;\n    al = (al * (n - 1) + Math.max(-c, 0)) / n;\n    out.push(rsiValue(ag, al));\n  }\n  return out;\n}\nfunction rsiValue(ag, al) {\n  if (al === 0) return 100;\n  if (ag === 0) return 0;\n  return 100 - 100 / (1 + ag / al);\n}\n\n// TradingView Stoch RSI: k = sma(stoch(rsi, rsi, rsi, stochLen), kSmooth); d = sma(k, 3).\nfunction stochRSI(closes, rsiLen = 14, stochLen = 14, kSmooth = 3) {\n  const r = rsiSeries(closes, rsiLen);\n  if (r.length < stochLen) return null;\n  const st = [];\n  for (let i = stochLen - 1; i < r.length; i++) {\n    const w = r.slice(i - stochLen + 1, i + 1);\n    const lo = Math.min(...w), hi = Math.max(...w);\n    st.push(hi > lo ? (r[i] - lo) / (hi - lo) * 100 : 50);\n  }\n  if (st.length < kSmooth) return null;\n  const ks = [];\n  for (let i = kSmooth - 1; i < st.length; i++) ks.push(avg(st.slice(i - kSmooth + 1, i + 1)));\n  const k = ks[ks.length - 1];\n  const d = ks.length >= 3 ? avg(ks.slice(-3)) : null;\n  return { k, d, raw: st[st.length - 1], bars: closes.length };\n}\n\n// The pre-2W approximation from btc-buy-zone-gauge.html, kept ONLY for side-by-side comparison.\nfunction legacyWeeklyStochRSI(daily) {\n  const wk = []; for (let i = daily.length - 1; i >= 0; i -= 7) wk.unshift(daily[i]);\n  const n = 14, out = []; let ag = 0, al = 0;\n  for (let i = 1; i <= n; i++) { const c = wk[i] - wk[i - 1]; ag += Math.max(c, 0); al += Math.max(-c, 0); }\n  ag /= n; al /= n; out.push(100 - 100 / (1 + (al ? ag / al : 1e9)));\n  for (let i = n + 1; i < wk.length; i++) {\n    const c = wk[i] - wk[i - 1];\n    ag = (ag * (n - 1) + Math.max(c, 0)) / n; al = (al * (n - 1) + Math.max(-c, 0)) / n;\n    out.push(100 - 100 / (1 + (al ? ag / al : 1e9)));\n  }\n  const rec = out.slice(-14), lo = Math.min(...rec), hi = Math.max(...rec);\n  return hi > lo ? (out[out.length - 1] - lo) / (hi - lo) * 100 : 50;\n}\n\n// ---------- bars: { openTime, open, high, low, close, closeTime } in ms UTC, ascending ----------\n\nfunction parseBinanceKlines(rows) {\n  return rows.map(r => ({ openTime: +r[0], open: +r[1], high: +r[2], low: +r[3], close: +r[4], closeTime: +r[6] }));\n}\n\n// Twelve Data returns newest-first; request with timezone=UTC. closeOffsetMs = how long after\n// openTime the bar is considered closed (e.g. 21h for a US daily bar: 16:00 ET is <= 21:00 UTC).\nfunction parseTwelveData(values, closeOffsetMs) {\n  return values.slice().reverse().map(v => {\n    const iso = v.datetime.length === 10 ? v.datetime + 'T00:00:00Z' : v.datetime.replace(' ', 'T') + 'Z';\n    const t = Date.parse(iso);\n    return { openTime: t, open: +v.open, high: +v.high, low: +v.low, close: +v.close, closeTime: t + closeOffsetMs - 1 };\n  });\n}\n\nfunction splitClosedForming(bars, now) {\n  now = now == null ? Date.now() : now;\n  const closed = bars.filter(b => b.closeTime < now);\n  const last = bars[bars.length - 1];\n  const forming = last && last.closeTime >= now ? last : null;\n  return { closed, forming };\n}\n\n// Calendar-anchored aggregation (e.g. 1w -> 2W, 1d -> 3d). Buckets are fixed on the epoch grid\n// (shifted so weekly buckets start on Monday), so boundaries never move as history grows.\n// anchorOffset shifts the grid by whole base bars to match a charting platform's anchor.\n// The first (possibly partial) bucket is dropped. closeTime = end of the calendar bucket.\nfunction aggregateBars(bars, group, baseMs, shiftMs, anchorOffset) {\n  shiftMs = shiftMs || 0; anchorOffset = anchorOffset || 0;\n  const out = []; let cur = null, curKey = null;\n  for (const b of bars) {\n    const key = Math.floor((Math.floor((b.openTime - shiftMs) / baseMs) + anchorOffset) / group);\n    if (key !== curKey) {\n      if (cur) out.push(cur);\n      cur = { openTime: b.openTime, open: b.open, high: b.high, low: b.low, close: b.close,\n              closeTime: ((key + 1) * group - anchorOffset) * baseMs + shiftMs - 1, count: 1 };\n      curKey = key;\n    } else {\n      cur.high = Math.max(cur.high, b.high); cur.low = Math.min(cur.low, b.low);\n      cur.close = b.close; cur.count++;\n    }\n  }\n  if (cur) out.push(cur);\n  if (out.length > 1) out.shift();\n  return out;\n}\n\n// ---------- the framework ----------\n\nconst DEFAULT_SETUP = { mingle_pct: 1.5, compress_pct: 5 };\n\nfunction tfSetup(closes, cfg) {\n  cfg = Object.assign({}, DEFAULT_SETUP, cfg || {});\n  if (closes.length < MIN_BARS) return { insufficient: true, bars: closes.length };\n  const p = closes[closes.length - 1];\n  const ma200 = sma(closes, 200);\n  const e21 = ema(closes, 21);\n  const above200 = p > ma200;\n  const emaAbove = e21 > ma200;\n  const dist21 = (p - e21) / e21 * 100;\n  const mingling = Math.abs(dist21) <= cfg.mingle_pct;\n  const spread = Math.abs(e21 - ma200) / ma200 * 100;\n  const compressed = spread < cfg.compress_pct;\n  return { insufficient: false, bars: closes.length, p, ma200, e21, above200, emaAbove, dist21, mingling, spread, compressed,\n           setup: above200 && emaAbove && mingling };\n}\n\nfunction ladder(v, L) {\n  for (const [t, s] of L.steps) if (v <= t) return s;\n  return L.else;\n}\n\nfunction zoneFor(total, zones) {\n  const z = zones.slice().sort((a, b) => b.min - a.min);\n  for (const zz of z) if (total >= zz.min) return zz.zone;\n  return z[z.length - 1].zone;\n}\n\n// values: { sentiment, stoch, ma200, ema21 } (null = unavailable -> the remaining weights are\n// renormalised, which is how a commodity profile with no sentiment component works, and how a\n// sentiment-API outage degrades instead of failing).\nfunction scoreProfile(values, cfg) {\n  const comps = {}; let ws = 0, tot = 0;\n  for (const key of Object.keys(cfg.weights)) {\n    const w = cfg.weights[key]; const v = values[key];\n    if (v == null || Number.isNaN(v)) { comps[key] = { value: null, score: null, weight: w, used: false }; continue; }\n    const s = key === 'stoch' ? 100 - v : ladder(v, cfg.ladders[key]);\n    comps[key] = { value: v, score: s, weight: w, used: true };\n    ws += w; tot += w * s;\n  }\n  const total = ws ? Math.round(tot / ws) : null;\n  return { components: comps, total, zone: total == null ? null : zoneFor(total, cfg.zones), weight_used: ws };\n}\n\nfunction computeAccumulation(input) {\n  const { dailyBars, weeklyBars, sentimentRaw, cfg } = input;\n  const daily = dailyBars.map(b => b.close);\n  if (daily.length < MIN_BARS) return { insufficient: true, bars: daily.length };\n  const sc = cfg.stoch || {};\n  const twoW = aggregateBars(weeklyBars, sc.group || 2, WEEK_MS, WEEK_SHIFT_MS, sc.anchor_offset || 0).map(b => b.close);\n  const st = stochRSI(twoW, sc.rsi_len || 14, sc.stoch_len || 14, sc.k_smooth || 3);\n  const price = daily[daily.length - 1];\n  const ma200 = sma(daily, 200), e21 = ema(daily, 21);\n  const vs200 = (price - ma200) / ma200 * 100, vs21 = (price - e21) / e21 * 100;\n  const sentiment = sentimentRaw == null || sentimentRaw === '' ? null : +sentimentRaw;\n  const score = scoreProfile({ sentiment, stoch: st ? st.k : null, ma200: vs200, ema21: vs21 }, cfg);\n  return { insufficient: false, price, ma200, ema21: e21, vs_ma200_pct: vs200, vs_ema21_pct: vs21,\n           stoch_rsi: st ? st.k : null, stoch: st, sentiment_raw: sentiment, score, bars: daily.length, bars_2w: twoW.length };\n}\n\n// One final row (last closed candle) + one live row (forming candle) per timeframe.\nfunction computeSetupRows(bars, timeframe, cfg, now) {\n  const { closed, forming } = splitClosedForming(bars, now);\n  const row = (bs, bar, isFinal) => Object.assign({ timeframe, period_start: bar.openTime, is_final: isFinal }, tfSetup(bs.map(b => b.close), cfg));\n  const rows = [];\n  if (closed.length) rows.push(row(closed, closed[closed.length - 1], 1));\n  if (forming) rows.push(row(bars, forming, 0));\n  return rows;\n}\n\nconst Indicators = { DAY_MS, WEEK_MS, WEEK_SHIFT_MS, MIN_BARS, avg, sma, ema, rsiSeries, stochRSI, legacyWeeklyStochRSI,\n  parseBinanceKlines, parseTwelveData, splitClosedForming, aggregateBars, tfSetup, ladder, zoneFor, scoreProfile,\n  computeAccumulation, computeSetupRows };\nif (typeof module !== 'undefined' && module.exports) module.exports = Indicators;\n\n\n// ===== drivers/_common.js =====\n// Shared helpers embedded after indicators.js in every collector Code node.\n\n// n8n hands HTTP responses over either as { body, headers, statusCode } (Full Response on) or as the\n// bare JSON. Return the JSON body for the i-th item, or null when the request failed.\nfunction responseBody(items, i) {\n  const it = items[i];\n  if (!it || !it.json) return null;\n  const j = it.json;\n  if (j.body !== undefined) return j.body;\n  if (j.error !== undefined && j.statusCode === undefined) return null;   // Continue-On-Fail error item\n  return j;\n}\n\nfunction klineRows(body) {\n  if (Array.isArray(body)) return body;\n  if (body && Array.isArray(body.data)) return body.data;\n  return null;\n}\n\nfunction accRow(symbol, periodStart, now, acc, extra) {\n  const base = { type: 'accumulation', symbol, period_start: periodStart, collected_at: now, is_final: 1 };\n  if (!acc || acc.insufficient) return Object.assign(base, { insufficient_data: 1, source_payload: { bars: acc ? acc.bars : 0 } });\n  const c = acc.score.components;\n  const sc = k => (c[k] && c[k].used ? c[k].score : null);\n  return Object.assign(base, {\n    price: acc.price, sentiment_raw: acc.sentiment_raw, sentiment_score: sc('sentiment'),\n    stoch_rsi: acc.stoch_rsi, stoch_score: sc('stoch'),\n    ma200: acc.ma200, vs_ma200_pct: acc.vs_ma200_pct, ma_score: sc('ma200'),\n    ema21: acc.ema21, vs_ema21_pct: acc.vs_ema21_pct, ema_score: sc('ema21'),\n    total_score: acc.score.total, zone: acc.score.zone, insufficient_data: 0,\n    source_payload: Object.assign({ bars: acc.bars, bars_2w: acc.bars_2w, stoch: acc.stoch, weight_used: acc.score.weight_used }, extra || {}),\n  });\n}\n\nfunction setupRow(symbol, r, now) {\n  const base = { type: 'setup', symbol, timeframe: r.timeframe, period_start: r.period_start, collected_at: now, is_final: r.is_final };\n  if (r.insufficient) return Object.assign(base, { insufficient_data: 1 });\n  return Object.assign(base, {\n    price: r.p, ma200: r.ma200, ema21: r.e21, above_200: r.above200 ? 1 : 0, ema_above_200: r.emaAbove ? 1 : 0,\n    dist21_pct: r.dist21, mingling: r.mingling ? 1 : 0, spread_pct: r.spread, compressed: r.compressed ? 1 : 0,\n    setup_bool: r.setup ? 1 : 0, insufficient_data: 0,\n  });\n}\n\n\n// ===== drivers/split_assets.js =====\n// Turn the /api/assets.php response into one item per asset for the data source this workflow serves.\nconst first = $input.first().json;\nconst body = first.body !== undefined ? first.body : first;\nconst wanted = 'binance';\nconst list = ((body && body.assets) || []).filter(a => a.data_source === wanted);\nif (!list.length) console.log('No active assets for data_source=' + wanted);\nreturn list.map(a => ({ json: a }));\n"
+      },
+      "id": "b2000000-0000-4000-8000-000000000022",
+      "name": "Split Assets",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Config').first().json.binance_base }}/api/v3/klines?symbol={{ $('Split Assets').item.json.source_symbol }}&interval=15m&limit=300",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "b2000000-0000-4000-8000-000000000023",
+      "name": "15m Klines",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        0
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Config').first().json.binance_base }}/api/v3/klines?symbol={{ $('Split Assets').item.json.source_symbol }}&interval=1h&limit=300",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "b2000000-0000-4000-8000-000000000024",
+      "name": "1h Klines",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        0
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "'use strict';\n// Canonical indicator math for the Buy-Zone tracker.\n// n8n/build.js embeds this file verbatim into every workflow's Code node,\n// so this is the single source of truth: edit here, run `node n8n/build.js`.\n\nconst DAY_MS = 86400000;\nconst WEEK_MS = 7 * DAY_MS;\nconst WEEK_SHIFT_MS = 4 * DAY_MS; // 1970-01-05 was a Monday; Binance weekly candles open Monday 00:00 UTC\nconst MIN_BARS = 220;             // 200 for the MA plus EMA warm-up\n\nconst avg = a => a.reduce((x, y) => x + y, 0) / a.length;\nconst sma = (a, n) => avg(a.slice(-n));\n\nfunction ema(a, n) {\n  const k = 2 / (n + 1);\n  let e = avg(a.slice(0, n));\n  for (let i = n; i < a.length; i++) e = a[i] * k + e * (1 - k);\n  return e;\n}\n\n// Wilder RSI, SMA-seeded, identical to TradingView's ta.rsi (ta.rma smoothing).\nfunction rsiSeries(closes, n) {\n  if (closes.length <= n) return [];\n  let ag = 0, al = 0;\n  for (let i = 1; i <= n; i++) { const c = closes[i] - closes[i - 1]; ag += Math.max(c, 0); al += Math.max(-c, 0); }\n  ag /= n; al /= n;\n  const out = [rsiValue(ag, al)];\n  for (let i = n + 1; i < closes.length; i++) {\n    const c = closes[i] - closes[i - 1];\n    ag = (ag * (n - 1) + Math.max(c, 0)) / n;\n    al = (al * (n - 1) + Math.max(-c, 0)) / n;\n    out.push(rsiValue(ag, al));\n  }\n  return out;\n}\nfunction rsiValue(ag, al) {\n  if (al === 0) return 100;\n  if (ag === 0) return 0;\n  return 100 - 100 / (1 + ag / al);\n}\n\n// TradingView Stoch RSI: k = sma(stoch(rsi, rsi, rsi, stochLen), kSmooth); d = sma(k, 3).\nfunction stochRSI(closes, rsiLen = 14, stochLen = 14, kSmooth = 3) {\n  const r = rsiSeries(closes, rsiLen);\n  if (r.length < stochLen) return null;\n  const st = [];\n  for (let i = stochLen - 1; i < r.length; i++) {\n    const w = r.slice(i - stochLen + 1, i + 1);\n    const lo = Math.min(...w), hi = Math.max(...w);\n    st.push(hi > lo ? (r[i] - lo) / (hi - lo) * 100 : 50);\n  }\n  if (st.length < kSmooth) return null;\n  const ks = [];\n  for (let i = kSmooth - 1; i < st.length; i++) ks.push(avg(st.slice(i - kSmooth + 1, i + 1)));\n  const k = ks[ks.length - 1];\n  const d = ks.length >= 3 ? avg(ks.slice(-3)) : null;\n  return { k, d, raw: st[st.length - 1], bars: closes.length };\n}\n\n// The pre-2W approximation from btc-buy-zone-gauge.html, kept ONLY for side-by-side comparison.\nfunction legacyWeeklyStochRSI(daily) {\n  const wk = []; for (let i = daily.length - 1; i >= 0; i -= 7) wk.unshift(daily[i]);\n  const n = 14, out = []; let ag = 0, al = 0;\n  for (let i = 1; i <= n; i++) { const c = wk[i] - wk[i - 1]; ag += Math.max(c, 0); al += Math.max(-c, 0); }\n  ag /= n; al /= n; out.push(100 - 100 / (1 + (al ? ag / al : 1e9)));\n  for (let i = n + 1; i < wk.length; i++) {\n    const c = wk[i] - wk[i - 1];\n    ag = (ag * (n - 1) + Math.max(c, 0)) / n; al = (al * (n - 1) + Math.max(-c, 0)) / n;\n    out.push(100 - 100 / (1 + (al ? ag / al : 1e9)));\n  }\n  const rec = out.slice(-14), lo = Math.min(...rec), hi = Math.max(...rec);\n  return hi > lo ? (out[out.length - 1] - lo) / (hi - lo) * 100 : 50;\n}\n\n// ---------- bars: { openTime, open, high, low, close, closeTime } in ms UTC, ascending ----------\n\nfunction parseBinanceKlines(rows) {\n  return rows.map(r => ({ openTime: +r[0], open: +r[1], high: +r[2], low: +r[3], close: +r[4], closeTime: +r[6] }));\n}\n\n// Twelve Data returns newest-first; request with timezone=UTC. closeOffsetMs = how long after\n// openTime the bar is considered closed (e.g. 21h for a US daily bar: 16:00 ET is <= 21:00 UTC).\nfunction parseTwelveData(values, closeOffsetMs) {\n  return values.slice().reverse().map(v => {\n    const iso = v.datetime.length === 10 ? v.datetime + 'T00:00:00Z' : v.datetime.replace(' ', 'T') + 'Z';\n    const t = Date.parse(iso);\n    return { openTime: t, open: +v.open, high: +v.high, low: +v.low, close: +v.close, closeTime: t + closeOffsetMs - 1 };\n  });\n}\n\nfunction splitClosedForming(bars, now) {\n  now = now == null ? Date.now() : now;\n  const closed = bars.filter(b => b.closeTime < now);\n  const last = bars[bars.length - 1];\n  const forming = last && last.closeTime >= now ? last : null;\n  return { closed, forming };\n}\n\n// Calendar-anchored aggregation (e.g. 1w -> 2W, 1d -> 3d). Buckets are fixed on the epoch grid\n// (shifted so weekly buckets start on Monday), so boundaries never move as history grows.\n// anchorOffset shifts the grid by whole base bars to match a charting platform's anchor.\n// The first (possibly partial) bucket is dropped. closeTime = end of the calendar bucket.\nfunction aggregateBars(bars, group, baseMs, shiftMs, anchorOffset) {\n  shiftMs = shiftMs || 0; anchorOffset = anchorOffset || 0;\n  const out = []; let cur = null, curKey = null;\n  for (const b of bars) {\n    const key = Math.floor((Math.floor((b.openTime - shiftMs) / baseMs) + anchorOffset) / group);\n    if (key !== curKey) {\n      if (cur) out.push(cur);\n      cur = { openTime: b.openTime, open: b.open, high: b.high, low: b.low, close: b.close,\n              closeTime: ((key + 1) * group - anchorOffset) * baseMs + shiftMs - 1, count: 1 };\n      curKey = key;\n    } else {\n      cur.high = Math.max(cur.high, b.high); cur.low = Math.min(cur.low, b.low);\n      cur.close = b.close; cur.count++;\n    }\n  }\n  if (cur) out.push(cur);\n  if (out.length > 1) out.shift();\n  return out;\n}\n\n// ---------- the framework ----------\n\nconst DEFAULT_SETUP = { mingle_pct: 1.5, compress_pct: 5 };\n\nfunction tfSetup(closes, cfg) {\n  cfg = Object.assign({}, DEFAULT_SETUP, cfg || {});\n  if (closes.length < MIN_BARS) return { insufficient: true, bars: closes.length };\n  const p = closes[closes.length - 1];\n  const ma200 = sma(closes, 200);\n  const e21 = ema(closes, 21);\n  const above200 = p > ma200;\n  const emaAbove = e21 > ma200;\n  const dist21 = (p - e21) / e21 * 100;\n  const mingling = Math.abs(dist21) <= cfg.mingle_pct;\n  const spread = Math.abs(e21 - ma200) / ma200 * 100;\n  const compressed = spread < cfg.compress_pct;\n  return { insufficient: false, bars: closes.length, p, ma200, e21, above200, emaAbove, dist21, mingling, spread, compressed,\n           setup: above200 && emaAbove && mingling };\n}\n\nfunction ladder(v, L) {\n  for (const [t, s] of L.steps) if (v <= t) return s;\n  return L.else;\n}\n\nfunction zoneFor(total, zones) {\n  const z = zones.slice().sort((a, b) => b.min - a.min);\n  for (const zz of z) if (total >= zz.min) return zz.zone;\n  return z[z.length - 1].zone;\n}\n\n// values: { sentiment, stoch, ma200, ema21 } (null = unavailable -> the remaining weights are\n// renormalised, which is how a commodity profile with no sentiment component works, and how a\n// sentiment-API outage degrades instead of failing).\nfunction scoreProfile(values, cfg) {\n  const comps = {}; let ws = 0, tot = 0;\n  for (const key of Object.keys(cfg.weights)) {\n    const w = cfg.weights[key]; const v = values[key];\n    if (v == null || Number.isNaN(v)) { comps[key] = { value: null, score: null, weight: w, used: false }; continue; }\n    const s = key === 'stoch' ? 100 - v : ladder(v, cfg.ladders[key]);\n    comps[key] = { value: v, score: s, weight: w, used: true };\n    ws += w; tot += w * s;\n  }\n  const total = ws ? Math.round(tot / ws) : null;\n  return { components: comps, total, zone: total == null ? null : zoneFor(total, cfg.zones), weight_used: ws };\n}\n\nfunction computeAccumulation(input) {\n  const { dailyBars, weeklyBars, sentimentRaw, cfg } = input;\n  const daily = dailyBars.map(b => b.close);\n  if (daily.length < MIN_BARS) return { insufficient: true, bars: daily.length };\n  const sc = cfg.stoch || {};\n  const twoW = aggregateBars(weeklyBars, sc.group || 2, WEEK_MS, WEEK_SHIFT_MS, sc.anchor_offset || 0).map(b => b.close);\n  const st = stochRSI(twoW, sc.rsi_len || 14, sc.stoch_len || 14, sc.k_smooth || 3);\n  const price = daily[daily.length - 1];\n  const ma200 = sma(daily, 200), e21 = ema(daily, 21);\n  const vs200 = (price - ma200) / ma200 * 100, vs21 = (price - e21) / e21 * 100;\n  const sentiment = sentimentRaw == null || sentimentRaw === '' ? null : +sentimentRaw;\n  const score = scoreProfile({ sentiment, stoch: st ? st.k : null, ma200: vs200, ema21: vs21 }, cfg);\n  return { insufficient: false, price, ma200, ema21: e21, vs_ma200_pct: vs200, vs_ema21_pct: vs21,\n           stoch_rsi: st ? st.k : null, stoch: st, sentiment_raw: sentiment, score, bars: daily.length, bars_2w: twoW.length };\n}\n\n// One final row (last closed candle) + one live row (forming candle) per timeframe.\nfunction computeSetupRows(bars, timeframe, cfg, now) {\n  const { closed, forming } = splitClosedForming(bars, now);\n  const row = (bs, bar, isFinal) => Object.assign({ timeframe, period_start: bar.openTime, is_final: isFinal }, tfSetup(bs.map(b => b.close), cfg));\n  const rows = [];\n  if (closed.length) rows.push(row(closed, closed[closed.length - 1], 1));\n  if (forming) rows.push(row(bars, forming, 0));\n  return rows;\n}\n\nconst Indicators = { DAY_MS, WEEK_MS, WEEK_SHIFT_MS, MIN_BARS, avg, sma, ema, rsiSeries, stochRSI, legacyWeeklyStochRSI,\n  parseBinanceKlines, parseTwelveData, splitClosedForming, aggregateBars, tfSetup, ladder, zoneFor, scoreProfile,\n  computeAccumulation, computeSetupRows };\nif (typeof module !== 'undefined' && module.exports) module.exports = Indicators;\n\n\n// ===== drivers/_common.js =====\n// Shared helpers embedded after indicators.js in every collector Code node.\n\n// n8n hands HTTP responses over either as { body, headers, statusCode } (Full Response on) or as the\n// bare JSON. Return the JSON body for the i-th item, or null when the request failed.\nfunction responseBody(items, i) {\n  const it = items[i];\n  if (!it || !it.json) return null;\n  const j = it.json;\n  if (j.body !== undefined) return j.body;\n  if (j.error !== undefined && j.statusCode === undefined) return null;   // Continue-On-Fail error item\n  return j;\n}\n\nfunction klineRows(body) {\n  if (Array.isArray(body)) return body;\n  if (body && Array.isArray(body.data)) return body.data;\n  return null;\n}\n\nfunction accRow(symbol, periodStart, now, acc, extra) {\n  const base = { type: 'accumulation', symbol, period_start: periodStart, collected_at: now, is_final: 1 };\n  if (!acc || acc.insufficient) return Object.assign(base, { insufficient_data: 1, source_payload: { bars: acc ? acc.bars : 0 } });\n  const c = acc.score.components;\n  const sc = k => (c[k] && c[k].used ? c[k].score : null);\n  return Object.assign(base, {\n    price: acc.price, sentiment_raw: acc.sentiment_raw, sentiment_score: sc('sentiment'),\n    stoch_rsi: acc.stoch_rsi, stoch_score: sc('stoch'),\n    ma200: acc.ma200, vs_ma200_pct: acc.vs_ma200_pct, ma_score: sc('ma200'),\n    ema21: acc.ema21, vs_ema21_pct: acc.vs_ema21_pct, ema_score: sc('ema21'),\n    total_score: acc.score.total, zone: acc.score.zone, insufficient_data: 0,\n    source_payload: Object.assign({ bars: acc.bars, bars_2w: acc.bars_2w, stoch: acc.stoch, weight_used: acc.score.weight_used }, extra || {}),\n  });\n}\n\nfunction setupRow(symbol, r, now) {\n  const base = { type: 'setup', symbol, timeframe: r.timeframe, period_start: r.period_start, collected_at: now, is_final: r.is_final };\n  if (r.insufficient) return Object.assign(base, { insufficient_data: 1 });\n  return Object.assign(base, {\n    price: r.p, ma200: r.ma200, ema21: r.e21, above_200: r.above200 ? 1 : 0, ema_above_200: r.emaAbove ? 1 : 0,\n    dist21_pct: r.dist21, mingling: r.mingling ? 1 : 0, spread_pct: r.spread, compressed: r.compressed ? 1 : 0,\n    setup_bool: r.setup ? 1 : 0, insufficient_data: 0,\n  });\n}\n\n\n// ===== drivers/swing.js =====\n// Swing Setup Collector: 15m + 1h setup rows (closed + forming candle) for swing-enabled crypto.\nconst assets = $('Split Assets').all().map(i => i.json);\nconst m15 = $('15m Klines').all();\nconst h1 = $('1h Klines').all();\nconst now = Date.now();\nconst out = [];\n\nfor (let i = 0; i < assets.length; i++) {\n  const a = assets[i];\n  const cfg = a.config || {};\n  const mRows = klineRows(responseBody(m15, i));\n  const hRows = klineRows(responseBody(h1, i));\n  if (!mRows || !hRows) {\n    console.log(a.symbol + ': missing klines (15m=' + !!mRows + ', 1h=' + !!hRows + ')');\n    out.push({ json: { symbol: a.symbol, error: 'missing klines', rows: [] } });\n    continue;\n  }\n  const rows = [];\n  for (const r of computeSetupRows(parseBinanceKlines(mRows), '15m', cfg.setup, now)) rows.push(setupRow(a.symbol, r, now));\n  for (const r of computeSetupRows(parseBinanceKlines(hRows), '1h', cfg.setup, now)) rows.push(setupRow(a.symbol, r, now));\n  out.push({ json: { symbol: a.symbol, rows } });\n}\nreturn out;\n"
+      },
+      "id": "b2000000-0000-4000-8000-000000000025",
+      "name": "Compute",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Config').first().json.base_url }}/api/ingest.php",
+        "options": {},
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ rows: $json.rows }) }}"
+      },
+      "id": "b2000000-0000-4000-8000-000000000026",
+      "name": "Ingest",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1540,
+        0
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "'use strict';\n// Canonical indicator math for the Buy-Zone tracker.\n// n8n/build.js embeds this file verbatim into every workflow's Code node,\n// so this is the single source of truth: edit here, run `node n8n/build.js`.\n\nconst DAY_MS = 86400000;\nconst WEEK_MS = 7 * DAY_MS;\nconst WEEK_SHIFT_MS = 4 * DAY_MS; // 1970-01-05 was a Monday; Binance weekly candles open Monday 00:00 UTC\nconst MIN_BARS = 220;             // 200 for the MA plus EMA warm-up\n\nconst avg = a => a.reduce((x, y) => x + y, 0) / a.length;\nconst sma = (a, n) => avg(a.slice(-n));\n\nfunction ema(a, n) {\n  const k = 2 / (n + 1);\n  let e = avg(a.slice(0, n));\n  for (let i = n; i < a.length; i++) e = a[i] * k + e * (1 - k);\n  return e;\n}\n\n// Wilder RSI, SMA-seeded, identical to TradingView's ta.rsi (ta.rma smoothing).\nfunction rsiSeries(closes, n) {\n  if (closes.length <= n) return [];\n  let ag = 0, al = 0;\n  for (let i = 1; i <= n; i++) { const c = closes[i] - closes[i - 1]; ag += Math.max(c, 0); al += Math.max(-c, 0); }\n  ag /= n; al /= n;\n  const out = [rsiValue(ag, al)];\n  for (let i = n + 1; i < closes.length; i++) {\n    const c = closes[i] - closes[i - 1];\n    ag = (ag * (n - 1) + Math.max(c, 0)) / n;\n    al = (al * (n - 1) + Math.max(-c, 0)) / n;\n    out.push(rsiValue(ag, al));\n  }\n  return out;\n}\nfunction rsiValue(ag, al) {\n  if (al === 0) return 100;\n  if (ag === 0) return 0;\n  return 100 - 100 / (1 + ag / al);\n}\n\n// TradingView Stoch RSI: k = sma(stoch(rsi, rsi, rsi, stochLen), kSmooth); d = sma(k, 3).\nfunction stochRSI(closes, rsiLen = 14, stochLen = 14, kSmooth = 3) {\n  const r = rsiSeries(closes, rsiLen);\n  if (r.length < stochLen) return null;\n  const st = [];\n  for (let i = stochLen - 1; i < r.length; i++) {\n    const w = r.slice(i - stochLen + 1, i + 1);\n    const lo = Math.min(...w), hi = Math.max(...w);\n    st.push(hi > lo ? (r[i] - lo) / (hi - lo) * 100 : 50);\n  }\n  if (st.length < kSmooth) return null;\n  const ks = [];\n  for (let i = kSmooth - 1; i < st.length; i++) ks.push(avg(st.slice(i - kSmooth + 1, i + 1)));\n  const k = ks[ks.length - 1];\n  const d = ks.length >= 3 ? avg(ks.slice(-3)) : null;\n  return { k, d, raw: st[st.length - 1], bars: closes.length };\n}\n\n// The pre-2W approximation from btc-buy-zone-gauge.html, kept ONLY for side-by-side comparison.\nfunction legacyWeeklyStochRSI(daily) {\n  const wk = []; for (let i = daily.length - 1; i >= 0; i -= 7) wk.unshift(daily[i]);\n  const n = 14, out = []; let ag = 0, al = 0;\n  for (let i = 1; i <= n; i++) { const c = wk[i] - wk[i - 1]; ag += Math.max(c, 0); al += Math.max(-c, 0); }\n  ag /= n; al /= n; out.push(100 - 100 / (1 + (al ? ag / al : 1e9)));\n  for (let i = n + 1; i < wk.length; i++) {\n    const c = wk[i] - wk[i - 1];\n    ag = (ag * (n - 1) + Math.max(c, 0)) / n; al = (al * (n - 1) + Math.max(-c, 0)) / n;\n    out.push(100 - 100 / (1 + (al ? ag / al : 1e9)));\n  }\n  const rec = out.slice(-14), lo = Math.min(...rec), hi = Math.max(...rec);\n  return hi > lo ? (out[out.length - 1] - lo) / (hi - lo) * 100 : 50;\n}\n\n// ---------- bars: { openTime, open, high, low, close, closeTime } in ms UTC, ascending ----------\n\nfunction parseBinanceKlines(rows) {\n  return rows.map(r => ({ openTime: +r[0], open: +r[1], high: +r[2], low: +r[3], close: +r[4], closeTime: +r[6] }));\n}\n\n// Twelve Data returns newest-first; request with timezone=UTC. closeOffsetMs = how long after\n// openTime the bar is considered closed (e.g. 21h for a US daily bar: 16:00 ET is <= 21:00 UTC).\nfunction parseTwelveData(values, closeOffsetMs) {\n  return values.slice().reverse().map(v => {\n    const iso = v.datetime.length === 10 ? v.datetime + 'T00:00:00Z' : v.datetime.replace(' ', 'T') + 'Z';\n    const t = Date.parse(iso);\n    return { openTime: t, open: +v.open, high: +v.high, low: +v.low, close: +v.close, closeTime: t + closeOffsetMs - 1 };\n  });\n}\n\nfunction splitClosedForming(bars, now) {\n  now = now == null ? Date.now() : now;\n  const closed = bars.filter(b => b.closeTime < now);\n  const last = bars[bars.length - 1];\n  const forming = last && last.closeTime >= now ? last : null;\n  return { closed, forming };\n}\n\n// Calendar-anchored aggregation (e.g. 1w -> 2W, 1d -> 3d). Buckets are fixed on the epoch grid\n// (shifted so weekly buckets start on Monday), so boundaries never move as history grows.\n// anchorOffset shifts the grid by whole base bars to match a charting platform's anchor.\n// The first (possibly partial) bucket is dropped. closeTime = end of the calendar bucket.\nfunction aggregateBars(bars, group, baseMs, shiftMs, anchorOffset) {\n  shiftMs = shiftMs || 0; anchorOffset = anchorOffset || 0;\n  const out = []; let cur = null, curKey = null;\n  for (const b of bars) {\n    const key = Math.floor((Math.floor((b.openTime - shiftMs) / baseMs) + anchorOffset) / group);\n    if (key !== curKey) {\n      if (cur) out.push(cur);\n      cur = { openTime: b.openTime, open: b.open, high: b.high, low: b.low, close: b.close,\n              closeTime: ((key + 1) * group - anchorOffset) * baseMs + shiftMs - 1, count: 1 };\n      curKey = key;\n    } else {\n      cur.high = Math.max(cur.high, b.high); cur.low = Math.min(cur.low, b.low);\n      cur.close = b.close; cur.count++;\n    }\n  }\n  if (cur) out.push(cur);\n  if (out.length > 1) out.shift();\n  return out;\n}\n\n// ---------- the framework ----------\n\nconst DEFAULT_SETUP = { mingle_pct: 1.5, compress_pct: 5 };\n\nfunction tfSetup(closes, cfg) {\n  cfg = Object.assign({}, DEFAULT_SETUP, cfg || {});\n  if (closes.length < MIN_BARS) return { insufficient: true, bars: closes.length };\n  const p = closes[closes.length - 1];\n  const ma200 = sma(closes, 200);\n  const e21 = ema(closes, 21);\n  const above200 = p > ma200;\n  const emaAbove = e21 > ma200;\n  const dist21 = (p - e21) / e21 * 100;\n  const mingling = Math.abs(dist21) <= cfg.mingle_pct;\n  const spread = Math.abs(e21 - ma200) / ma200 * 100;\n  const compressed = spread < cfg.compress_pct;\n  return { insufficient: false, bars: closes.length, p, ma200, e21, above200, emaAbove, dist21, mingling, spread, compressed,\n           setup: above200 && emaAbove && mingling };\n}\n\nfunction ladder(v, L) {\n  for (const [t, s] of L.steps) if (v <= t) return s;\n  return L.else;\n}\n\nfunction zoneFor(total, zones) {\n  const z = zones.slice().sort((a, b) => b.min - a.min);\n  for (const zz of z) if (total >= zz.min) return zz.zone;\n  return z[z.length - 1].zone;\n}\n\n// values: { sentiment, stoch, ma200, ema21 } (null = unavailable -> the remaining weights are\n// renormalised, which is how a commodity profile with no sentiment component works, and how a\n// sentiment-API outage degrades instead of failing).\nfunction scoreProfile(values, cfg) {\n  const comps = {}; let ws = 0, tot = 0;\n  for (const key of Object.keys(cfg.weights)) {\n    const w = cfg.weights[key]; const v = values[key];\n    if (v == null || Number.isNaN(v)) { comps[key] = { value: null, score: null, weight: w, used: false }; continue; }\n    const s = key === 'stoch' ? 100 - v : ladder(v, cfg.ladders[key]);\n    comps[key] = { value: v, score: s, weight: w, used: true };\n    ws += w; tot += w * s;\n  }\n  const total = ws ? Math.round(tot / ws) : null;\n  return { components: comps, total, zone: total == null ? null : zoneFor(total, cfg.zones), weight_used: ws };\n}\n\nfunction computeAccumulation(input) {\n  const { dailyBars, weeklyBars, sentimentRaw, cfg } = input;\n  const daily = dailyBars.map(b => b.close);\n  if (daily.length < MIN_BARS) return { insufficient: true, bars: daily.length };\n  const sc = cfg.stoch || {};\n  const twoW = aggregateBars(weeklyBars, sc.group || 2, WEEK_MS, WEEK_SHIFT_MS, sc.anchor_offset || 0).map(b => b.close);\n  const st = stochRSI(twoW, sc.rsi_len || 14, sc.stoch_len || 14, sc.k_smooth || 3);\n  const price = daily[daily.length - 1];\n  const ma200 = sma(daily, 200), e21 = ema(daily, 21);\n  const vs200 = (price - ma200) / ma200 * 100, vs21 = (price - e21) / e21 * 100;\n  const sentiment = sentimentRaw == null || sentimentRaw === '' ? null : +sentimentRaw;\n  const score = scoreProfile({ sentiment, stoch: st ? st.k : null, ma200: vs200, ema21: vs21 }, cfg);\n  return { insufficient: false, price, ma200, ema21: e21, vs_ma200_pct: vs200, vs_ema21_pct: vs21,\n           stoch_rsi: st ? st.k : null, stoch: st, sentiment_raw: sentiment, score, bars: daily.length, bars_2w: twoW.length };\n}\n\n// One final row (last closed candle) + one live row (forming candle) per timeframe.\nfunction computeSetupRows(bars, timeframe, cfg, now) {\n  const { closed, forming } = splitClosedForming(bars, now);\n  const row = (bs, bar, isFinal) => Object.assign({ timeframe, period_start: bar.openTime, is_final: isFinal }, tfSetup(bs.map(b => b.close), cfg));\n  const rows = [];\n  if (closed.length) rows.push(row(closed, closed[closed.length - 1], 1));\n  if (forming) rows.push(row(bars, forming, 0));\n  return rows;\n}\n\nconst Indicators = { DAY_MS, WEEK_MS, WEEK_SHIFT_MS, MIN_BARS, avg, sma, ema, rsiSeries, stochRSI, legacyWeeklyStochRSI,\n  parseBinanceKlines, parseTwelveData, splitClosedForming, aggregateBars, tfSetup, ladder, zoneFor, scoreProfile,\n  computeAccumulation, computeSetupRows };\nif (typeof module !== 'undefined' && module.exports) module.exports = Indicators;\n\n\n// ===== drivers/_common.js =====\n// Shared helpers embedded after indicators.js in every collector Code node.\n\n// n8n hands HTTP responses over either as { body, headers, statusCode } (Full Response on) or as the\n// bare JSON. Return the JSON body for the i-th item, or null when the request failed.\nfunction responseBody(items, i) {\n  const it = items[i];\n  if (!it || !it.json) return null;\n  const j = it.json;\n  if (j.body !== undefined) return j.body;\n  if (j.error !== undefined && j.statusCode === undefined) return null;   // Continue-On-Fail error item\n  return j;\n}\n\nfunction klineRows(body) {\n  if (Array.isArray(body)) return body;\n  if (body && Array.isArray(body.data)) return body.data;\n  return null;\n}\n\nfunction accRow(symbol, periodStart, now, acc, extra) {\n  const base = { type: 'accumulation', symbol, period_start: periodStart, collected_at: now, is_final: 1 };\n  if (!acc || acc.insufficient) return Object.assign(base, { insufficient_data: 1, source_payload: { bars: acc ? acc.bars : 0 } });\n  const c = acc.score.components;\n  const sc = k => (c[k] && c[k].used ? c[k].score : null);\n  return Object.assign(base, {\n    price: acc.price, sentiment_raw: acc.sentiment_raw, sentiment_score: sc('sentiment'),\n    stoch_rsi: acc.stoch_rsi, stoch_score: sc('stoch'),\n    ma200: acc.ma200, vs_ma200_pct: acc.vs_ma200_pct, ma_score: sc('ma200'),\n    ema21: acc.ema21, vs_ema21_pct: acc.vs_ema21_pct, ema_score: sc('ema21'),\n    total_score: acc.score.total, zone: acc.score.zone, insufficient_data: 0,\n    source_payload: Object.assign({ bars: acc.bars, bars_2w: acc.bars_2w, stoch: acc.stoch, weight_used: acc.score.weight_used }, extra || {}),\n  });\n}\n\nfunction setupRow(symbol, r, now) {\n  const base = { type: 'setup', symbol, timeframe: r.timeframe, period_start: r.period_start, collected_at: now, is_final: r.is_final };\n  if (r.insufficient) return Object.assign(base, { insufficient_data: 1 });\n  return Object.assign(base, {\n    price: r.p, ma200: r.ma200, ema21: r.e21, above_200: r.above200 ? 1 : 0, ema_above_200: r.emaAbove ? 1 : 0,\n    dist21_pct: r.dist21, mingling: r.mingling ? 1 : 0, spread_pct: r.spread, compressed: r.compressed ? 1 : 0,\n    setup_bool: r.setup ? 1 : 0, insufficient_data: 0,\n  });\n}\n\n\n// ===== drivers/split_alerts.js =====\n// One item per alert returned by /api/ingest.php; zero items = nothing downstream runs.\nconst out = [];\nfor (const it of $input.all()) {\n  const b = it.json.body !== undefined ? it.json.body : it.json;\n  if (!b || b.ok !== true) { console.log('ingest failed: ' + JSON.stringify(b).slice(0, 300)); continue; }\n  for (const a of b.alerts || []) {\n    out.push({ json: { title: a.title, priority: a.priority, tags: a.tags || 'information_source', msg: a.message, symbol: a.symbol, scope: a.scope } });\n  }\n}\nreturn out;\n"
+      },
+      "id": "b2000000-0000-4000-8000-000000000027",
+      "name": "Split Alerts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Config').first().json.ntfy_url }}",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Title",
+              "value": "={{ $json.title }}"
+            },
+            {
+              "name": "Priority",
+              "value": "={{ $json.priority }}"
+            },
+            {
+              "name": "Tags",
+              "value": "={{ $json.tags }}"
+            }
+          ]
+        },
+        "method": "POST",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "text/plain",
+        "body": "={{ $json.msg }}"
+      },
+      "id": "b2000000-0000-4000-8000-000000000028",
+      "name": "ntfy Push",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1980,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Schedule": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Get Assets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Assets": {
+      "main": [
+        [
+          {
+            "node": "Split Assets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Assets": {
+      "main": [
+        [
+          {
+            "node": "15m Klines",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "15m Klines": {
+      "main": [
+        [
+          {
+            "node": "1h Klines",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "1h Klines": {
+      "main": [
+        [
+          {
+            "node": "Compute",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compute": {
+      "main": [
+        [
+          {
+            "node": "Ingest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ingest": {
+      "main": [
+        [
+          {
+            "node": "Split Alerts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Alerts": {
+      "main": [
+        [
+          {
+            "node": "ntfy Push",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "UTC"
+  },
+  "pinData": {},
+  "meta": {
+    "buyzone": {
+      "generated_by": "n8n/build.js",
+      "notes": "Runs one minute after every 15m candle close (UTC), crypto with swing_enabled=1 only."
+    }
+  }
+}

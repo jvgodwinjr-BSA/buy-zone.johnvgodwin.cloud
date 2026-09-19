@@ -1,0 +1,11 @@
+{
+  "name": "buy-zone-tracker",
+  "private": true,
+  "description": "Multi-asset buy-zone tracker: PHP/MySQL site fed by n8n collectors (Crypto Lifer framework).",
+  "scripts": {
+    "test": "node --test n8n/test/indicators.test.js n8n/test/workflows.test.js",
+    "build:n8n": "node n8n/build.js",
+    "check:n8n": "node n8n/build.js --check",
+    "smoke": "node n8n/test/api.smoke.js"
+  }
+}

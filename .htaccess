@@ -1,0 +1,10 @@
+# Safety net only. The subdomain's document root should point at /public;
+# if it is ever pointed at the repo root instead, this blocks everything
+# that is not the site.
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteRule ^(db|n8n|legacy|reference|\.git)(/|$) - [F,L]
+  RewriteRule ^(CLAUDE\.md|README\.md|\.gitignore)$ - [F,L]
+  RewriteCond %{REQUEST_URI} !^/public/
+  RewriteRule ^(.*)$ public/$1 [L]
+</IfModule>
