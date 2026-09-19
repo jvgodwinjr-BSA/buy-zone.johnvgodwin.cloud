@@ -1,0 +1,10 @@
+# Secrets and local config — never committed
+public/config.local.php
+.env
+*.local.php
+
+# Local tooling
+node_modules/
+.DS_Store
+*.log
+/tmp/
