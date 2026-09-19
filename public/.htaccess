@@ -1,0 +1,17 @@
+# Pass the Authorization header through to PHP (some shared hosts drop it for CGI/FPM).
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteCond %{HTTP:Authorization} .
+  RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+  # Never serve the includes directly.
+  RewriteRule ^includes/ - [F,L]
+</IfModule>
+<IfModule mod_setenvif.c>
+  SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1
+</IfModule>
+
+<FilesMatch "^(config\.local\.php|config\.local\.php\.example)$">
+  Require all denied
+</FilesMatch>
+
+DirectoryIndex index.php

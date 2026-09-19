@@ -52,6 +52,9 @@ JSON is out of date.
 1. **Database** — hPanel → Databases → MySQL: create a database and user, note host/name/user/password.
 2. **Git deploy** — hPanel → Advanced → Git: connect this repository, branch `main`, deploy into the
    subdomain's folder (e.g. `domains/buy-zone.johnvgodwin.cloud/`). Enable auto-deploy on push.
+   If the GitHub repository is private, hPanel shows an SSH public key under Git → *Generate SSH key*:
+   add it on GitHub as a **deploy key** (repo → Settings → Deploy keys, read-only) before connecting,
+   and use the repository's SSH URL (`git@github.com:jvgodwinjr-BSA/buy-zone.johnvgodwin.cloud.git`).
 3. **Document root** — hPanel → Websites → the subdomain → set the document root to
    `<deploy folder>/public`. (If the root cannot be changed, the repo-level `.htaccess` rewrites
    into `public/` and blocks `db/`, `n8n/`, `legacy/` — but setting the root is the clean option.)

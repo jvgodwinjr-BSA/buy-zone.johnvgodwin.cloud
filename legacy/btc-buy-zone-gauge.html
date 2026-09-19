@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BTC Buy Zone Gauge</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: -apple-system, Segoe UI, Roboto, sans-serif; max-width: 720px; margin: 24px auto; padding: 0 16px; background:#0e1116; color:#e8eaed; }
+  h1 { font-size: 1.3rem; margin-bottom: 2px; }
+  h2 { font-size: 1.05rem; margin: 30px 0 8px; border-top:1px solid #2a2f36; padding-top:22px; }
+  .sub { color:#9aa0a6; font-size:.85rem; margin-bottom:20px; }
+  .gauge-wrap { position:relative; height:64px; border-radius:10px; overflow:hidden; margin:18px 0 6px;
+    background:linear-gradient(90deg,#c0392b 0%,#e67e22 40%,#f1c40f 60%,#27ae60 80%,#0b7a3b 100%); }
+  .needle { position:absolute; top:0; bottom:0; width:4px; background:#fff; box-shadow:0 0 8px #000; transition:left .8s; }
+  .scale-labels { display:flex; justify-content:space-between; font-size:.72rem; color:#9aa0a6; margin-bottom:18px; }
+  .score { font-size:2.6rem; font-weight:700; }
+  .zone { font-size:1.05rem; font-weight:600; margin-bottom:14px; }
+  table { width:100%; border-collapse:collapse; font-size:.9rem; }
+  td { padding:8px 6px; border-bottom:1px solid #2a2f36; }
+  td:last-child { text-align:right; font-variant-numeric:tabular-nums; }
+  .good { color:#2ecc71; } .mid { color:#f1c40f; } .bad { color:#e74c3c; }
+  .badge { display:inline-block; padding:3px 10px; border-radius:12px; font-size:.8rem; font-weight:600; }
+  .b-good { background:#12452a; color:#2ecc71; } .b-mid { background:#4a3f10; color:#f1c40f; } .b-bad { background:#4a1712; color:#e74c3c; }
+  .note { font-size:.78rem; color:#9aa0a6; margin-top:18px; line-height:1.5; }
+  .err { color:#e74c3c; }
+  button { background:#2a2f36; color:#e8eaed; border:0; padding:8px 14px; border-radius:8px; cursor:pointer; }
+</style>
+</head>
+<body>
+<h1>Bitcoin Buy-Zone Gauge</h1>
+<div class="sub">Based on the "Crypto Lifer" framework. Refreshes live on open. <button onclick="load()">Refresh</button></div>
+
+<div id="status">Loading live data…</div>
+<div id="dash" style="display:none">
+
+  <h2 style="border:0;padding:0;margin-top:6px">1 · Long-Term Accumulation (spot / DCA reserves)</h2>
+  <div class="score" id="score"></div>
+  <div class="zone" id="zone"></div>
+  <div class="gauge-wrap"><div class="needle" id="needle"></div></div>
+  <div class="scale-labels"><span>0 — Overheated</span><span>40</span><span>60</span><span>80</span><span>100 — Max Fear / Deploy</span></div>
+  <table id="tbl"></table>
+
+  <h2>2 · Trade Setup — 21 EMA + 200 MA (Daily &amp; 4H)</h2>
+  <div class="zone" id="setupverdict"></div>
+  <table id="tbl2"></table>
+</div>
+
+<div class="note">
+<b>Panel 1 (weights):</b> Fear &amp; Greed 40% (≤10 = extreme signal), weekly stochastic RSI 30%, price vs 200-day MA 15%, distance from 21-day EMA 15%. 80+ = deploy reserves · 60–79 = strong accumulation · 40–59 = baseline DCA only · &lt;40 = extended, hold reserves.<br><br>
+<b>Panel 2 (per timeframe):</b> The core entry model requires (1) price above the 200 MA, (2) price pulled back to "mingle" with the 21 EMA (within ~1.5%), (3) 21 EMA above the 200 MA, and bonus: 21/200 tightly compressed (&lt;5% apart) = pre-breakout loading. All conditions met on a timeframe = <b>SETUP</b> — then the framework says wait for a candle-<i>body</i> close breakout before entry, with a stop below the 200 MA / wick low. Daily and 4H agreeing = highest conviction; disagreement = reduced size or no trade.<br><br>
+Information tool built from your source material, not financial advice.
+</div>
+
+<script>
+async function load() {
+  const s = document.getElementById('status');
+  s.textContent = 'Loading live data…'; s.className='';
+  try {
+    const [fngR, cgDaily, cgHourly] = await Promise.all([
+      fetch('https://api.alternative.me/fng/?limit=1').then(r=>r.json()),
+      fetch('https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?vs_currency=usd&days=365&interval=daily').then(r=>r.json()),
+      fetch('https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?vs_currency=usd&days=60').then(r=>r.json())
+    ]);
+    const fng = +fngR.data[0].value;
+    const daily = cgDaily.prices.map(p=>p[1]);
+    const hourly = cgHourly.prices.map(p=>p[1]);
+    const h4 = []; for (let i = hourly.length-1; i >= 0; i -= 4) h4.unshift(hourly[i]);
+    const price = daily[daily.length-1];
+
+    /* ---------- Panel 1: accumulation ---------- */
+    const ma200 = avg(daily.slice(-200));
+    const ema21d = ema(daily, 21);
+    const stoch = weeklyStochRSI(daily);
+    const fngScore = fng<=5?100: fng<=10?92: fng<=20?75: fng<=30?60: fng<=45?42: fng<=60?28: fng<=75?15:5;
+    const stochScore = 100 - stoch;
+    const vs200 = (price-ma200)/ma200*100;
+    const maScore = vs200<=-20?100: vs200<=-10?85: vs200<=0?70: vs200<=10?50: vs200<=25?30:12;
+    const vs21 = (price-ema21d)/ema21d*100;
+    const emaScore = vs21<=0?85: vs21<=3?70: vs21<=8?45: vs21<=15?25:10;
+    const total = Math.round(fngScore*.40 + stochScore*.30 + maScore*.15 + emaScore*.15);
+    const zone = total>=80?['DEPLOY RESERVES — max-fear accumulation zone','good']:
+                 total>=60?['STRONG BUY ZONE — accumulate','good']:
+                 total>=40?['NEUTRAL — baseline DCA only','mid']:
+                           ['EXTENDED — DCA only, hold reserves','bad'];
+    document.getElementById('score').textContent = total + ' / 100';
+    const z = document.getElementById('zone'); z.textContent = zone[0]; z.className = 'zone '+zone[1];
+    document.getElementById('needle').style.left = 'calc('+total+'% - 2px)';
+    document.getElementById('tbl').innerHTML =
+      row('BTC price', '$'+Math.round(price).toLocaleString()) +
+      row('Fear & Greed Index', fng + ' ('+fngR.data[0].value_classification+') → score '+fngScore, cls(fngScore)) +
+      row('Weekly stochastic RSI', stoch.toFixed(0)+' → score '+stochScore.toFixed(0), cls(stochScore)) +
+      row('Price vs 200-day MA', pct(vs200)+' ($'+Math.round(ma200).toLocaleString()+') → score '+maScore, cls(maScore)) +
+      row('Price vs 21-day EMA', pct(vs21)+' ($'+Math.round(ema21d).toLocaleString()+') → score '+emaScore, cls(emaScore)) +
+      row('Updated', new Date().toLocaleString());
+
+    /* ---------- Panel 2: trade setup, daily + 4H ---------- */
+    const dRes = tfSetup(daily.slice(-260));
+    const hRes = tfSetup(h4);
+    document.getElementById('tbl2').innerHTML =
+      tfRows('Daily', dRes) + tfRows('4-Hour', hRes);
+    const v = document.getElementById('setupverdict');
+    if (dRes.setup && hRes.setup) { v.textContent = 'SETUP ON BOTH TIMEFRAMES — watch for candle-body breakout'; v.className='zone good'; }
+    else if (dRes.setup || hRes.setup) { v.textContent = 'SETUP ON '+(dRes.setup?'DAILY':'4H')+' ONLY — reduced size per framework'; v.className='zone mid'; }
+    else if (dRes.above200 && hRes.above200) { v.textContent = 'TREND OK, NO SETUP — waiting for 21 EMA pullback'; v.className='zone mid'; }
+    else { v.textContent = 'NO TRADE — timeframe conflict or below 200 MA'; v.className='zone bad'; }
+
+    s.textContent=''; document.getElementById('dash').style.display='block';
+  } catch(e) {
+    s.innerHTML = '<span class="err">Could not load data ('+e.message+'). CoinGecko rate-limits — wait a minute and hit Refresh.</span>';
+  }
+}
+
+function tfSetup(closes){
+  const p = closes[closes.length-1];
+  const ma200 = avg(closes.slice(-200));
+  const e21 = ema(closes, 21);
+  const above200 = p > ma200;
+  const emaAbove = e21 > ma200;
+  const dist21 = (p-e21)/e21*100;               // % from 21 EMA
+  const mingling = Math.abs(dist21) <= 1.5;      // pulled back to the 21
+  const spread = Math.abs(e21-ma200)/ma200*100;  // 21/200 compression
+  const compressed = spread < 5;
+  const setup = above200 && emaAbove && mingling;
+  return {p, ma200, e21, above200, emaAbove, dist21, mingling, spread, compressed, setup};
+}
+function tfRows(name, r){
+  const badge = r.setup
+    ? '<span class="badge b-good">SETUP'+(r.compressed?' + COMPRESSED':'')+'</span>'
+    : r.above200 ? '<span class="badge b-mid">'+(r.mingling?'21 EMA below 200':'waiting for pullback')+'</span>'
+    : '<span class="badge b-bad">below 200 MA</span>';
+  return row('<b>'+name+'</b>', badge) +
+    row('&nbsp;&nbsp;Price vs 200 MA', pct((r.p-r.ma200)/r.ma200*100)+' ($'+Math.round(r.ma200).toLocaleString()+')', r.above200?'good':'bad') +
+    row('&nbsp;&nbsp;Price vs 21 EMA', pct(r.dist21)+' ($'+Math.round(r.e21).toLocaleString()+')'+(r.mingling?' — mingling':''), r.mingling?'good':'mid') +
+    row('&nbsp;&nbsp;21/200 spread', r.spread.toFixed(1)+'%'+(r.compressed?' — compressed (pre-breakout)':''), r.compressed?'good':'mid');
+}
+const avg = a => a.reduce((x,y)=>x+y,0)/a.length;
+function ema(a,n){ const k=2/(n+1); let e=avg(a.slice(0,n)); for(let i=n;i<a.length;i++) e=a[i]*k+e*(1-k); return e; }
+function weeklyStochRSI(daily){
+  const wk=[]; for(let i=daily.length-1;i>=0;i-=7) wk.unshift(daily[i]);
+  const n=14, out=[]; let ag=0, al=0;
+  for(let i=1;i<=n;i++){ const c=wk[i]-wk[i-1]; ag+=Math.max(c,0); al+=Math.max(-c,0); }
+  ag/=n; al/=n; out.push(100-100/(1+(al?ag/al:1e9)));
+  for(let i=n+1;i<wk.length;i++){ const c=wk[i]-wk[i-1];
+    ag=(ag*(n-1)+Math.max(c,0))/n; al=(al*(n-1)+Math.max(-c,0))/n;
+    out.push(100-100/(1+(al?ag/al:1e9))); }
+  const rec=out.slice(-14), lo=Math.min(...rec), hi=Math.max(...rec);
+  return hi>lo ? (out[out.length-1]-lo)/(hi-lo)*100 : 50;
+}
+const cls = s => s>=70?'good': s>=40?'mid':'bad';
+const pct = v => (v>=0?'+':'')+v.toFixed(1)+'%';
+const row = (k,v,c)=>'<tr><td>'+k+'</td><td class="'+(c||'')+'">'+v+'</td></tr>';
+load();
+</script>
+</body>
+</html>
