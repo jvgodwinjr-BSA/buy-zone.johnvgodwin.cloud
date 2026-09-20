@@ -100,6 +100,9 @@ function is_stale(?string $collectedAt, int $cadenceSec): bool
 
 function stale_html(?string $collectedAt, int $cadenceSec): string
 {
+    if ($collectedAt === null) {
+        return '';   // nothing collected yet: the page already says it is waiting for the first run
+    }
     return is_stale($collectedAt, $cadenceSec)
         ? '<span class="stale" title="Newest row is older than twice the collector cadence">STALE</span>'
         : '';
