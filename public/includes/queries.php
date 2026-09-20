@@ -52,7 +52,7 @@ function latest_reading(int $assetId): ?array
 // One row per UTC day (the day's last reading), oldest first. $n <= 0 = every day stored.
 function daily_series(int $assetId, int $n): array
 {
-    $st = db()->prepare('SELECT r.period_start, r.total_score, r.zone, r.price, r.sentiment_raw, r.stoch_rsi, r.insufficient_data
+    $st = db()->prepare('SELECT r.period_start, r.total_score, r.zone, r.price, r.stoch_rsi, r.insufficient_data
         FROM readings r
         JOIN (SELECT MAX(period_start) AS ps FROM readings WHERE asset_id = ? GROUP BY DATE(period_start)) m ON m.ps = r.period_start
         WHERE r.asset_id = ? ORDER BY r.period_start DESC' . ($n > 0 ? ' LIMIT ' . (int)$n : ''));

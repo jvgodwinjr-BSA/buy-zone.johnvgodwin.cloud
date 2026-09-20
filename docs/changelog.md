@@ -4,6 +4,8 @@ Append a line per merged PR (newest first). Include the PR number and anything a
 (re-deploy n8n, re-import SQL, edit `config.local.php`).
 
 ## 2026-09-20
+- PR #11 — Score-trend chart: Fear & Greed line and its trigger marker removed (too noisy to read on real
+  data); the chart is the zone-coloured score plus the 2W stoch RSI.
 - PR #10 — Score-trend chart: 180-day default with a 48d/90d/180d/1y/2y/all selector, Fear & Greed and 2W
   stoch RSI lines on the same 0–100 axis, dashed F&G ≤ 10 trigger. New manual workflow
   `BuyZone — Crypto Backfill (manual)` + ingest `backfill: true` flag (stores history, never alerts).

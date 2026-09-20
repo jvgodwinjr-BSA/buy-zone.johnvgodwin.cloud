@@ -31,17 +31,12 @@ $setupCollected = latest_setup_collected_at((int)$asset['id'], $ltf['timeframes'
 
 $spanDays = count($series) > 1 ? (strtotime(end($series)['period_start'] . ' UTC') - strtotime($series[0]['period_start'] . ' UTC')) / 86400 : 0;
 $labelFmt = $spanDays > 365 ? 'M j Y' : 'M j';
-$hasSentiment = ($cfg['sentiment_source'] ?? 'none') !== 'none';
 $col = fn(string $k) => array_map(fn($p) => $p[$k] === null ? null : (float)$p[$k], $series);
 $chart = [
     'labels' => array_map(fn($p) => gmdate($labelFmt, strtotime($p['period_start'] . ' UTC')), $series),
     'scores' => $col('total_score'),
     'zones' => array_map(fn($z) => ['min' => (int)$z['min'], 'zone' => $z['zone'], 'color' => $z['color']], zones_with_colors($cfg)),
-    // the hypothesis inputs on the same 0-100 axis: the raw sentiment index and the raw 2W stoch RSI
-    'fng' => $hasSentiment ? $col('sentiment_raw') : null,
-    'fng_label' => ($cfg['sentiment_source'] ?? '') === 'cnn' ? 'CNN Fear & Greed' : 'Fear & Greed',
-    'fng_trigger' => $hasSentiment ? (int)cfg('fng_extreme_threshold', 10) : null,
-    'stoch' => $col('stoch_rsi'),
+    'stoch' => $col('stoch_rsi'),   // the raw 2W stoch RSI on the same 0-100 axis (the daily Fear & Greed line was too noisy to read)
 ];
 
 page_head($asset['symbol'] . ' · Long-Term', 'investing', true);
@@ -68,8 +63,7 @@ if (count($series) < 2) {
     echo '<p class="muted">Collecting history — the trend line appears once at least two days of readings exist.</p>';
 } else {
     echo '<div class="chart-box tall"><canvas data-kind="score" data-chart=\'' . h(json_encode($chart, JSON_UNESCAPED_SLASHES)) . '\'></canvas></div>';
-    echo '<div class="muted" style="font-size:.75rem">One point per UTC day (the day\'s last reading); every intraday reading is kept. The score is coloured by zone; the thin lines are the two hypothesis inputs on the same 0–100 scale'
-        . ($hasSentiment ? ', with the dashed line at the F&amp;G ≤ ' . (int)cfg('fng_extreme_threshold', 10) . ' deploy trigger' : '') . '. Click a legend entry to hide or show a line.</div>';
+    echo '<div class="muted" style="font-size:.75rem">One point per UTC day (the day\'s last reading); every intraday reading is kept. The score is coloured by zone; the thin line is the 2-week stochastic RSI on the same 0–100 scale. Click a legend entry to hide or show a line.</div>';
 }
 
 echo '<h2>2 · Trade Setup — 21 EMA + 200 MA (' . h(implode(' / ', array_map('strtoupper', $ltf['timeframes']))) . ')'
