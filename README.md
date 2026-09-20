@@ -1,8 +1,15 @@
 # Buy Zone — multi-asset buy-zone tracker
 
-A PHP/MySQL website (Hostinger, `buy-zone.johnvgodwin.cloud`) fed by n8n collectors on the VPS.
-It scores crypto, stocks and commodities on the "Crypto Lifer" framework (see `CLAUDE.md`),
-stores every reading, shows zone-colored trend charts, and pushes ntfy alerts on transitions.
+A PHP/MySQL website on Hostinger (`https://buy-zone.johnvgodwin.cloud`) fed by n8n collectors on a
+VPS. It scores crypto, stocks and commodities on the "Crypto Lifer" framework, stores every reading,
+draws zone-colored trend charts, and pushes ntfy alerts when a state changes. It is an information
+tool, not a trading bot.
+
+- **Long-Term Investing** (`/investing/`): a 0–100 accumulation gauge per asset (Fear & Greed,
+  2-week stochastic RSI, price vs 200-day MA, price vs 21-day EMA), a 48-day zone-colored trend, and
+  the 21 EMA + 200 MA setup panel on 4h / 1d / 3d.
+- **Swing Trades** (`/swing/`): the same setup panel on 15m / 1h for crypto, with a 48-candle
+  state strip per timeframe.
 
 ```
 n8n collectors (cron, UTC)                     Hostinger
@@ -13,26 +20,38 @@ n8n collectors (cron, UTC)                     Hostinger
                                                             setup_readings, alert_state, alert_log
 ```
 
-n8n is the only place indicators are computed (`n8n/indicators.js`, embedded into the workflow
-Code nodes by `n8n/build.js`). The site only reads the database.
+All indicator math lives in `n8n/indicators.js` and is embedded into the workflows by `n8n/build.js`;
+the site only reads the database. Weights, ladders and zone cutoffs are data (`scoring_profiles`).
+
+## Documentation map
+
+| | |
+|---|---|
+| `CLAUDE.md` | Hard rules, the framework as a config spec, current state — read by Claude Code every session |
+| `docs/environment.md` | Where everything runs: Hostinger layout, the shared n8n VPS, ids, what cloud vs local Claude sessions can reach |
+| `docs/runbooks.md` | Add an asset · add a stock/commodity · tune weights · change the math · re-deploy n8n · rotate secrets · troubleshoot · backups |
+| `docs/data-model.md` | Tables, profile config JSON, glossary, ready-made report queries |
+| `docs/api.md` | `assets.php` / `ingest.php` contracts and the alert transition rules |
+| `docs/swing-page.md` | How the Swing page computes and draws, step by step (verification reference) |
+| `docs/decisions.md` | The decision log (why PHP not WordPress, closed-candle rule, shared-n8n constraints, …) |
+| `docs/changelog.md` | What changed, per PR, with any operator action |
 
 ## Repository layout
 
 | Path | What |
 |---|---|
-| `public/` | Web root. `investing/`, `swing/`, `api/`, `includes/`, `assets/` |
+| `public/` | Web root: `investing/`, `swing/`, `api/`, `includes/`, `assets/` (Chart.js vendored) |
 | `public/config.local.php` | **Not committed.** DB credentials + API bearer token (copy from `.example`) |
-| `db/schema.sql`, `db/seed.sql` | Tables; scoring profiles (weights / ladders / zones) and the initial assets |
-| `n8n/indicators.js` | Canonical math (EMA, Wilder RSI, Stoch RSI 14/14/3, 2W & 3d aggregation, `tfSetup`, scoring) |
-| `n8n/drivers/*.js` | Per-workflow Code-node logic; `n8n/build.js` assembles `n8n/workflows/*.n8n.json` |
-| `n8n/workflows/` | The three importable workflows (generated — do not hand-edit) |
-| `n8n/test/` | Unit tests, workflow tests, API smoke test, dev sample-data pusher |
-| `legacy/` | The original single-file BTC dashboard and n8n workflow, for reference |
+| `db/schema.sql`, `db/seed.sql` | Tables; the three scoring profiles and the initial assets |
+| `n8n/indicators.js`, `n8n/drivers/`, `n8n/build.js` | Canonical math, per-workflow glue, generator of `n8n/workflows/*.n8n.json` |
+| `n8n/deploy.py`, `n8n/diagnose.py`, `n8n/deploy.env.example` | Deploy/verify the workflows on the shared n8n over an SSH tunnel (from John's Mac) |
+| `n8n/test/` | Unit tests, workflow tests, API smoke test, mock n8n API, sample-data pusher |
+| `legacy/` | The original single-file BTC dashboard and workflow, reference only |
 | `reference/` | Drop the framework synthesis files here when a rule needs checking |
 
 ## Local development
 
-Requirements: PHP 8.1+ with `pdo_mysql`, MySQL 8 / MariaDB 10.x, Node 20+.
+Requirements: PHP 8.1+ with `pdo_mysql`, MySQL 8 / MariaDB 10.x, Node 20+, Python 3.
 
 ```bash
 mysql -e "CREATE DATABASE buyzone CHARACTER SET utf8mb4; CREATE USER 'buyzone'@'localhost' IDENTIFIED BY 'buyzone'; GRANT ALL ON buyzone.* TO 'buyzone'@'localhost';"
@@ -43,136 +62,61 @@ npm test                                                     # indicator + workf
 API_TOKEN=<token> node n8n/test/sample_data.js               # optional: fake history so the pages have data
 ```
 
-Changing the math: edit `n8n/indicators.js` (or a driver), add/adjust a test, then
-`npm run build:n8n` and commit the regenerated workflow JSON. `npm run check:n8n` fails if the
-JSON is out of date.
+Changing the math: edit `n8n/indicators.js` (or a driver), add a test, `npm run build:n8n`, commit the
+regenerated JSON (`npm run check:n8n` fails if it is stale), then re-deploy (`docs/runbooks.md` §4).
 
-## Deploying to Hostinger (in this order)
+## Production setup (already done — kept as the reference procedure)
 
-1. **Database** — hPanel → Databases → MySQL: create a database and user, note host/name/user/password.
-2. **Git deploy** — hPanel → Advanced → Git: connect this repository, branch `main`, deploy into the
-   subdomain's folder (e.g. `domains/buy-zone.johnvgodwin.cloud/`). Enable auto-deploy on push.
-   If the GitHub repository is private, hPanel shows an SSH public key under Git → *Generate SSH key*:
-   add it on GitHub as a **deploy key** (repo → Settings → Deploy keys, read-only) before connecting,
-   and use the repository's SSH URL (`git@github.com:jvgodwinjr-BSA/buy-zone.johnvgodwin.cloud.git`).
-3. **Document root** — hPanel → Websites → the subdomain → set the document root to
-   `<deploy folder>/public`. (If the root cannot be changed, the repo-level `.htaccess` rewrites
-   into `public/` and blocks `db/`, `n8n/`, `legacy/` — but setting the root is the clean option.)
-4. **Secrets** — File Manager: create `public/config.local.php` from `config.local.php.example`
-   with the DB values and a fresh token (`php -r 'echo bin2hex(random_bytes(32));'`).
-5. **Schema** — phpMyAdmin → the database → Import `db/schema.sql`, then `db/seed.sql`.
-6. **Check** — open `https://buy-zone.johnvgodwin.cloud/investing/` (cards show "waiting for first
-   collector run") and run the API check below.
+**Hostinger** (hPanel): create the MySQL database and user → Advanced → Git: connect this repository
+on `main` with auto-deploy (private repo: add hPanel's SSH key as a read-only deploy key on GitHub) →
+File Manager: create `public/config.local.php` from the `.example` with the DB values and a token from
+`openssl rand -hex 32` → phpMyAdmin: import `db/schema.sql`, then `db/seed.sql` → open `/investing/`.
+The document root is the repo root; the `.htaccess` files route into `public/` and block everything
+else. Setting the document root to `<folder>/public` is optional and cleaner.
 
-### API check (run from your machine; the token never leaves it)
-
+API check from your machine (the token never leaves it):
 ```bash
-export BASE=https://buy-zone.johnvgodwin.cloud TOKEN=<your api_token>
-curl -s -H "Authorization: Bearer $TOKEN" "$BASE/api/assets.php"            # -> {"assets":[BTC, ETH ...]}
-curl -s -o /dev/null -w "%{http_code}\n" "$BASE/api/assets.php"             # -> 401
+read -s TOKEN
+curl -s -H "Authorization: Bearer $TOKEN" https://buy-zone.johnvgodwin.cloud/api/assets.php | head -c 300   # -> {"assets":[…
+curl -s -o /dev/null -w "%{http_code}\n" https://buy-zone.johnvgodwin.cloud/api/assets.php                  # -> 401
 ```
-If the first call returns 401 with the right token, the host is stripping the `Authorization`
-header: set `SITE_API_TOKEN` as usual and, in the n8n UI, edit the `BuyZone — Ingest Token` credential to header name
-`X-Api-Token` with the raw token as the value — the API accepts both.
+If the first call is 401 with the right token, the host strips `Authorization`: use header
+`X-Api-Token: <token>` instead (the API accepts both) in the n8n `BuyZone — Ingest Token` credential.
 
-Full transition test (optional; uses a throwaway asset):
-```sql
-INSERT INTO assets (symbol, display_name, asset_class, data_source, source_symbol, accum_profile_id, swing_enabled, is_active, sort_order)
-VALUES ('ZZTEST','Smoke test','crypto','binance','ZZTESTUSDT',(SELECT id FROM scoring_profiles WHERE name='crypto_accum'),1,0,999);
-```
+**n8n** (shared instance, SSH-only — details and rules in `docs/environment.md` and `CLAUDE.md`):
+one-time in the UI through a tunnel (`ssh -L 5678:127.0.0.1:5678 john@76.13.110.193`,
+`http://127.0.0.1:5678`): Settings → n8n API → create a key. On the Mac:
 ```bash
-BASE_URL=$BASE API_TOKEN=$TOKEN node n8n/test/api.smoke.js      # expects "all checks passed"
+cp n8n/deploy.env.example n8n/deploy.env     # N8N_API_KEY, SITE_API_TOKEN, NTFY_URL (git-ignored)
+TOPIC="buyzone-$(openssl rand -hex 6)"; sed -i '' "s#^NTFY_URL=.*#NTFY_URL=https://ntfy.sh/$TOPIC#" n8n/deploy.env; echo "$TOPIC"
+python3 n8n/deploy.py --list                 # read-only sanity check
+python3 n8n/deploy.py --dry-run              # plan
+python3 n8n/deploy.py                        # create/update + activate the three BuyZone — workflows
+python3 n8n/diagnose.py                      # after the next run: executions, failing node, Ingest response
 ```
-```sql
-DELETE FROM assets WHERE symbol='ZZTEST';   -- cascades: removes everything the test wrote
-```
-
-## n8n setup (shared instance on the VPS)
-
-n8n runs in Docker on the VPS bound to `127.0.0.1:5678` — reachable only over SSH, never exposed
-publicly, and shared with other projects (`SecOps –`, `Troop Parking —`). Everything BuyZone
-creates there is prefixed `BuyZone — `; nothing else is touched. Deployment goes through n8n's
-public REST API over an SSH tunnel (`n8n/deploy.py`, Python stdlib only), never through the
-database file. The cloud Claude Code sandbox cannot SSH, so this runs from your own machine.
-
-One-time, in the n8n UI (tunnel from your machine: `ssh -L 5678:127.0.0.1:5678 john@76.13.110.193`,
-then open http://127.0.0.1:5678): **Settings → n8n API → Create an API key** (label `claude-buyzone`).
-Credentials are created by the script, not by hand.
-
-On your machine (key-based SSH to the VPS must already work):
-
-```bash
-cp n8n/deploy.env.example n8n/deploy.env      # git-ignored; fill in N8N_API_KEY and SITE_API_TOKEN
-python3 n8n/deploy.py --list                  # read-only: lists every workflow on the instance
-python3 n8n/deploy.py --dry-run               # prints the plan, writes nothing
-python3 n8n/deploy.py                         # creates/updates + activates the three workflows
-```
-
-The script:
-- opens the SSH tunnel itself and talks to `http://127.0.0.1:5678/api/v1`;
-- reads the ntfy URL from the existing `BTC Buy-Zone Alerts` workflow (override with `NTFY_URL`);
-- creates `BuyZone — Ingest Token` (Header Auth), `BuyZone — Twelve Data` (Query Auth, `placeholder`
-  until you have a key) and, only if a token is needed, `BuyZone — ntfy`, binds them to the right
-  nodes, and remembers their ids in `n8n/.deploy-state.json` (git-ignored) so re-runs reuse them;
-- refuses to write any workflow whose name does not start with `BuyZone — `.
-
-Afterwards, in the UI: each `BuyZone — ` workflow should show active/published. This n8n build
-separates draft from published — API activation normally publishes, and the script warns if the
-draft still differs; in that case click **Publish** on that workflow. Run *Test workflow* once on
-each and check the **Ingest** node output shows `"ok": true`; the first run seeds alert state, so
-no ntfy alerts fire until a later transition. Keep the old `BTC Buy-Zone Alerts` workflow active
-until the numbers are validated (below), then deactivate it yourself in the UI — the script never
-modifies it.
-
-Troubleshooting a run: `python3 n8n/diagnose.py` (read-only, same env file and tunnel) prints each
-`BuyZone — ` workflow's active/published state and its latest executions with the failing node, HTTP
-code and error body, plus the Ingest node's response on successful runs. `--workflow Swing` narrows it.
-
-Re-deploying after a change: edit `n8n/indicators.js` or a driver, `npm run build:n8n`, commit,
-then `python3 n8n/deploy.py` again — it updates the existing workflows in place.
-
-Requests per run: crypto = 1 (F&G) + 3 per asset; stocks/commodities = 1 (CNN) + 3 per asset,
-throttled to one Twelve Data call per 8 s (free tier: 8/min, 800/day → fine for ~25 symbols daily).
-
-## Validating against TradingView (once, after the first runs)
-
-Open BTC on TradingView and compare with the BTC page / the `readings` and `setup_readings` rows:
-
-- **2-week Stoch RSI** — TradingView, 2W chart, Stoch RSI (14, 14, 3, 3): the `%K` value should
-  match `readings.stoch_rsi` within a point or two. If it is consistently off by one bucket, set
-  `stoch.anchor_offset` to `1` in the profile config (`scoring_profiles.config`) — it shifts the
-  2-week grid by one week.
-- **3d MA200 / EMA21** — TradingView 3D chart vs the 3D row of the setup panel. If the bar
-  boundaries differ, set `setup_anchor_3d` (0, 1 or 2) in the profile config.
-- **Daily 200 MA / 21 EMA** and the **4h** values should match closely as-is.
+Subscribe the ntfy phone app to the topic; test with `curl -d test https://ntfy.sh/<topic>`. The
+script creates the `BuyZone — ` credentials, binds them, and never touches anything else on the instance.
 
 ## Operating it
 
-- **Add an asset** — insert a row in `assets` (phpMyAdmin). `source_symbol` is the provider ticker
-  (`SOLUSDT`, `NVDA`, `XAU/USD`, or an ETF proxy such as `USO` for oil); `data_source` is `binance`
-  or `twelvedata`; pick the profile; `swing_enabled=1` for 15m/1h tracking (crypto only for now).
-  The next collector run picks it up — no deploy needed.
-- **Tune weights / thresholds / zones** — edit `scoring_profiles.config` (JSON). Weights must sum to 100.
-- **Mute an alert scope** — `alerts_enabled` in `public/includes/defaults.php` (or override the key
-  in `config.local.php`). Data keeps flowing; only the push stops.
-- **Change a schedule** — the cron expression in the workflow's Schedule node (UTC).
-- **STALE badge** on a page — the collector has not written for more than twice its cadence: check
-  the n8n execution list for that workflow.
-- **Add a password later** — implement `require_page_auth()` in `public/includes/auth.php`; every
-  page already calls it, and the API is unaffected.
+Day to day everything is in `docs/runbooks.md`: adding assets (a SQL insert; no deploy), tuning
+weights/zones (edit the profile JSON; no deploy), changing the math (test → build → PR → deploy),
+rotating secrets, muting alert scopes, and a troubleshooting table keyed by what the page or
+`diagnose.py` says. A red **STALE** badge means a collector stopped writing.
 
-## Alert rules (unchanged from the original workflow)
+## Alert rules
 
 | Trigger | ntfy priority |
 |---|---|
-| Accumulation zone enters DEPLOY | max |
-| Accumulation zone enters STRONG_BUY | high |
-| Any other zone change | default |
+| Accumulation zone enters DEPLOY / STRONG_BUY / any other change | max / high / default |
 | Fear & Greed drops to ≤ 10 (crypto) | max |
-| Setup on 1d + 4h (closed candles) | max |
-| Setup on one of 1d / 4h, or a downgrade to one | high |
-| Setup on 3d only | default |
-| Swing: 15m + 1h / one of them | max / high |
+| Setup on 1d + 4h (closed candles) / one of them / 3d only | max / high / default |
+| Swing setup on 15m + 1h / one of them | max / high |
 
-Alerts fire on state *transitions* only, evaluated on closed candles; the first run for an asset
-seeds state silently. Everything sent is in `alert_log`.
+Alerts fire on state *transitions* only; the first run for an asset seeds state silently. Everything
+sent is in `alert_log`.
+
+## Verification history
+
+2026-09-20: BTC 2W Stoch RSI (99), 1D SMA 200 ($70,540) and EMA 21 ($77,875) matched TradingView
+exactly with both grid anchors at 0. Re-check only after a rule or anchor change.
