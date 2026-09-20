@@ -77,6 +77,22 @@ n8n (VPS, cron in UTC)                                  Hostinger (buy-zone.john
 - Insufficient history (< 220 bars on a timeframe) stores a row with `insufficient_data=1` and
   never alerts; the page shows "insufficient history".
 
+## Shared n8n Instance — Rules
+
+- One n8n (Docker) on the VPS `john@76.13.110.193`, bound to `127.0.0.1:5678`, shared with
+  `SecOps –` and `Troop Parking —` workflows built by other projects. Reach it only over SSH;
+  **never change the binding or expose it publicly.** The cloud Claude Code sandbox cannot SSH,
+  so n8n work runs from John's machine with `n8n/deploy.py` (public API over an SSH tunnel).
+- Prefix everything we create with `BuyZone — ` (workflows and credentials). Never modify,
+  rename, deactivate or delete a workflow or credential that is not ours — including the
+  original `BTC Buy-Zone Alerts` workflow (John deactivates it himself at cut-over) and the
+  deprecated `Gmail account` credential.
+- Never edit `~/secops/data/n8n/database.sqlite` directly; go through the API. This n8n build
+  separates draft (`versionId`) from published (`activeVersionId`); they converge only when
+  Publish is clicked in the UI. Verify real state (active flag, executions, rows landing on the
+  site) — never trust a "success" label.
+- Sudo on the VPS is John's; flag anything that needs it instead of attempting it.
+
 ## Indicators (match TradingView)
 - RSI: Wilder/RMA, SMA-seeded (`ta.rsi`). Stoch RSI: `sma(stoch(rsi,14),3)` = TV (14,14,3,3) %K.
 - 2-week closes: weekly candles aggregated on a Monday-anchored epoch grid (`stoch.anchor_offset`
@@ -90,6 +106,8 @@ n8n (VPS, cron in UTC)                                  Hostinger (buy-zone.john
 - `BASE_URL=… API_TOKEN=… node n8n/test/api.smoke.js` — end-to-end API/transition test (uses a
   throwaway `ZZTEST` asset; see README).
 - Local site: `php -S 127.0.0.1:8080 -t public` with MariaDB + `public/config.local.php`.
+- `python3 n8n/deploy.py --list | --dry-run | (deploy)` — from a machine with SSH to the VPS;
+  `python3 n8n/test/mock_n8n.py 15678` + `--no-tunnel --base-url http://127.0.0.1:15678` tests it here.
 
 ## Known Issues / Caveats
 - Binance.com is geo-blocked from US IPs — `binance_base` in each workflow's Config node can be
