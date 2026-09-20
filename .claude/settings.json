@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm test)",
+      "Bash(npm run check:n8n)",
+      "Bash(npm run build:n8n)",
+      "Bash(node --test:*)",
+      "Bash(php -l:*)",
+      "Bash(python3 n8n/deploy.py --list)",
+      "Bash(python3 n8n/deploy.py --dry-run)",
+      "Bash(python3 n8n/diagnose.py:*)",
+      "Bash(git status:*)",
+      "Bash(git log:*)",
+      "Bash(git diff:*)"
+    ]
+  }
+}

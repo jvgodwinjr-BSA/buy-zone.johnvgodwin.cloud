@@ -6,6 +6,8 @@
     "test": "node --test n8n/test/indicators.test.js n8n/test/workflows.test.js",
     "build:n8n": "node n8n/build.js",
     "check:n8n": "node n8n/build.js --check",
-    "smoke": "node n8n/test/api.smoke.js"
+    "smoke": "node n8n/test/api.smoke.js",
+    "deploy:n8n": "python3 n8n/deploy.py",
+    "diagnose:n8n": "python3 n8n/diagnose.py"
   }
 }
