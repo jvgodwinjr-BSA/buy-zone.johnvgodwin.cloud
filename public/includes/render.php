@@ -25,14 +25,28 @@ function base_url_from(string $requestPath): string
     return rtrim($p, '/');
 }
 
+/**
+ * URL for a file under public/ with a content-hash version. Hostinger's CDN caches static files for
+ * 7 days, so without this a browser can keep an old app.js while the page HTML has already changed.
+ */
+function asset_url(string $path): string
+{
+    static $versions = [];
+    if (!isset($versions[$path])) {
+        $file = __DIR__ . '/../' . $path;
+        $versions[$path] = is_file($file) ? substr(md5_file($file), 0, 8) : '0';
+    }
+    return base_url() . '/' . $path . '?v=' . $versions[$path];
+}
+
 function page_head(string $title, string $active, bool $charts = false): void
 {
     $b = base_url();
     echo '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">';
     echo '<title>' . h($title) . ' · ' . h(cfg('site')['name']) . '</title>';
-    echo '<link rel="stylesheet" href="' . h($b) . '/assets/style.css">';
+    echo '<link rel="stylesheet" href="' . h(asset_url('assets/style.css')) . '">';
     if ($charts) {
-        echo '<script src="' . h($b) . '/assets/vendor/chart.umd.min.js"></script>';
+        echo '<script src="' . h(asset_url('assets/vendor/chart.umd.min.js')) . '"></script>';
     }
     echo '</head><body><header class="top"><a class="brand" href="' . h($b) . '/investing/">' . h(cfg('site')['name']) . '</a><nav>';
     echo '<a href="' . h($b) . '/investing/"' . ($active === 'investing' ? ' class="on"' : '') . '>Long-Term Investing</a>';
@@ -43,7 +57,7 @@ function page_head(string $title, string $active, bool $charts = false): void
 function page_foot(): void
 {
     echo '</main><footer class="note">Information tool built from the "Crypto Lifer" framework — not financial advice. Times shown in your local timezone.</footer>';
-    echo '<script src="' . h(base_url()) . '/assets/app.js"></script></body></html>';
+    echo '<script src="' . h(asset_url('assets/app.js')) . '"></script></body></html>';
 }
 
 function time_tag(?string $utc): string

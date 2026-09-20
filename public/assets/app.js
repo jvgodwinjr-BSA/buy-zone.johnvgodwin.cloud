@@ -40,7 +40,7 @@ function swingChart(el, data) {
   if (!window.Chart) return;
   const colors = { setup: '#2ecc71', wait: '#f1c40f', below: '#e74c3c', none: '#5f6368' };
   new Chart(el, {
-    data: { labels: data.times.map(localTime), datasets: [
+    data: { labels: (data.times || data.labels || []).map(localTime), datasets: [
       { type: 'line', data: data.dist, yAxisID: 'y', borderColor: '#e8eaed', borderWidth: 1.5, pointRadius: 2.5, tension: 0.2, spanGaps: true,
         pointBackgroundColor: data.states.map(s => colors[s] || colors.none), pointBorderColor: data.states.map(s => colors[s] || colors.none) },
       { type: 'bar', data: data.states.map(() => 1), yAxisID: 'y2', backgroundColor: data.states.map(s => colors[s] || colors.none),

@@ -12,7 +12,7 @@ Facts a new session needs before touching anything. Secrets are never here — o
 | Document root | The **repo root** (`public_html`). The root `.htaccess` routes requests into `public/` and blocks `db/`, `n8n/`, `legacy/`, `.git`, `CLAUDE.md`, `README.md`, `package.json`; `public/.htaccess` blocks `includes/` and `config.local.php*`. Consequence: `/public/investing/` also works. Pointing the document root at `public_html/public` in hPanel is the clean option and needs no code change. |
 | Secrets | `public_html/public/config.local.php` — DB host/name/user/password and `api_token` (64 hex). Git-ignored; edited in hPanel File Manager. |
 | Database | MySQL, `host` = `localhost` for PHP. Managed through hPanel → phpMyAdmin (imports, adding assets, tuning profiles, backups). |
-| Runtime | PHP 8.3 on LiteSpeed behind Hostinger's CDN (`server: hcdn`). `Authorization` headers reach PHP (verified). Uncaught exceptions are logged with `error_log()`; look for `error_log` files next to the executing script (e.g. `public_html/public/investing/error_log`) or hPanel → Logs. |
+| Runtime | PHP 8.3 on LiteSpeed behind Hostinger's CDN (`server: hcdn`). PHP pages are not cached (`x-hcdn-cache-status: DYNAMIC`); `assets/*` are cached 7 days, so `asset_url()` appends a content hash. `Authorization` headers reach PHP (verified). Uncaught exceptions are logged with `error_log()`; look for `error_log` files next to the executing script (e.g. `public_html/public/investing/error_log`) or hPanel → Logs. |
 | DNS | `ALIAS @` and `CNAME www` point at `*.cdn.hstgr.net` (Hostinger CDN). Do not replace them with the server IP. |
 
 ## The collectors — shared n8n on the VPS

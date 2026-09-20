@@ -4,6 +4,9 @@ Append a line per merged PR (newest first). Include the PR number and anything a
 (re-deploy n8n, re-import SQL, edit `config.local.php`).
 
 ## 2026-09-20
+- PR #9 — Static assets are versioned by content hash (`asset_url()` in `render.php`): Hostinger's CDN
+  caches `assets/*` for 7 days, which left browsers running the old `app.js` against the new swing chart
+  payload from PR #8 (blank charts until a hard refresh). `swingChart` also accepts either payload key.
 - PR #8 — Swing chart x-axis labels shown in the viewer's local time (ISO timestamps from PHP, formatted
   by the shared `localTime()` helper in `app.js`) so they match the badge table.
 - PR #7 — Documentation overhaul: `docs/` (environment, data model + report queries, API, runbooks,

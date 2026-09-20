@@ -86,6 +86,7 @@ The scripts open their own SSH tunnel (local port 15678). They only ever write w
 | `deploy.py`: `ssh exited` / tunnel timeout | Key access to `john@76.13.110.193` from this machine; try `ssh john@76.13.110.193 true`. |
 | `deploy.py`: `404 for /api/v1/workflows` | n8n public API disabled or wrong base URL. |
 | Draft ≠ published after deploy | Click **Publish** on that workflow in the n8n UI (this n8n build separates the two). |
+| A chart or style is broken right after a deploy | Hostinger's CDN caches `assets/*` for 7 days. `asset_url()` versions each file by content hash, so a normal reload fetches the new copy; a page loaded before that fix needs one hard refresh. |
 
 ## 9. Backups
 - Database: phpMyAdmin → Export (SQL, all tables) monthly, or before schema changes. Restores by import.
