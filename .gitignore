@@ -8,3 +8,5 @@ node_modules/
 .DS_Store
 *.log
 /tmp/
+n8n/deploy.env
+n8n/.deploy-state.json

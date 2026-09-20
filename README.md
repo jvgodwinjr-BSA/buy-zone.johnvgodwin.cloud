@@ -72,8 +72,8 @@ curl -s -H "Authorization: Bearer $TOKEN" "$BASE/api/assets.php"            # ->
 curl -s -o /dev/null -w "%{http_code}\n" "$BASE/api/assets.php"             # -> 401
 ```
 If the first call returns 401 with the right token, the host is stripping the `Authorization`
-header: switch the n8n "BuyZone Ingest Token" credential to header name `X-Api-Token` (value = the
-raw token) — the API accepts both.
+header: set `SITE_API_TOKEN` as usual and, in the n8n UI, edit the `BuyZone — Ingest Token` credential to header name
+`X-Api-Token` with the raw token as the value — the API accepts both.
 
 Full transition test (optional; uses a throwaway asset):
 ```sql
@@ -87,24 +87,45 @@ BASE_URL=$BASE API_TOKEN=$TOKEN node n8n/test/api.smoke.js      # expects "all c
 DELETE FROM assets WHERE symbol='ZZTEST';   -- cascades: removes everything the test wrote
 ```
 
-## n8n setup
+## n8n setup (shared instance on the VPS)
 
-1. **Credentials** (n8n → Credentials → New):
-   - `BuyZone Ingest Token` — type *Header Auth*: Name `Authorization`, Value `Bearer <api_token>`
-   - `Twelve Data` — type *Query Auth*: Name `apikey`, Value `<your Twelve Data key>` (free tier at twelvedata.com)
-   - `ntfy` — only if your topic is protected: *Header Auth* `Authorization: Bearer tk_...`
-2. **Import** the three files in `n8n/workflows/` (Workflows → Import from file), or via the public
-   API (`POST /api/v1/workflows` with the file's `name`, `nodes`, `connections`, `settings`).
-3. In each workflow open the **Config** node and set `base_url` (the site), `ntfy_url` (your topic —
-   copy it from the existing `BTC Buy-Zone Alerts` workflow) and, for the two crypto workflows,
-   `binance_base` (`https://api.binance.com`, or `https://api.binance.us` if the VPS is geo-blocked;
-   binance.us symbols are `BTCUSD`, so update `assets.source_symbol` accordingly).
-4. Select the credentials on the nodes that need them: **Get Assets** and **Ingest** → `BuyZone
-   Ingest Token`; **TD Daily / TD Weekly / TD 4h** → `Twelve Data`; **ntfy Push** → `ntfy` if used.
-5. Run each workflow once manually (Test workflow), check the **Ingest** node output shows
-   `"ok": true`, then activate. The first run seeds alert state — no alerts fire until a later transition.
-6. Keep the old `BTC Buy-Zone Alerts` workflow active until the numbers are validated (below), then
-   deactivate it so alerts are not duplicated.
+n8n runs in Docker on the VPS bound to `127.0.0.1:5678` — reachable only over SSH, never exposed
+publicly, and shared with other projects (`SecOps –`, `Troop Parking —`). Everything BuyZone
+creates there is prefixed `BuyZone — `; nothing else is touched. Deployment goes through n8n's
+public REST API over an SSH tunnel (`n8n/deploy.py`, Python stdlib only), never through the
+database file. The cloud Claude Code sandbox cannot SSH, so this runs from your own machine.
+
+One-time, in the n8n UI (tunnel from your machine: `ssh -L 5678:127.0.0.1:5678 john@76.13.110.193`,
+then open http://127.0.0.1:5678): **Settings → n8n API → Create an API key** (label `claude-buyzone`).
+Credentials are created by the script, not by hand.
+
+On your machine (key-based SSH to the VPS must already work):
+
+```bash
+cp n8n/deploy.env.example n8n/deploy.env      # git-ignored; fill in N8N_API_KEY and SITE_API_TOKEN
+python3 n8n/deploy.py --list                  # read-only: lists every workflow on the instance
+python3 n8n/deploy.py --dry-run               # prints the plan, writes nothing
+python3 n8n/deploy.py                         # creates/updates + activates the three workflows
+```
+
+The script:
+- opens the SSH tunnel itself and talks to `http://127.0.0.1:5678/api/v1`;
+- reads the ntfy URL from the existing `BTC Buy-Zone Alerts` workflow (override with `NTFY_URL`);
+- creates `BuyZone — Ingest Token` (Header Auth), `BuyZone — Twelve Data` (Query Auth, `placeholder`
+  until you have a key) and, only if a token is needed, `BuyZone — ntfy`, binds them to the right
+  nodes, and remembers their ids in `n8n/.deploy-state.json` (git-ignored) so re-runs reuse them;
+- refuses to write any workflow whose name does not start with `BuyZone — `.
+
+Afterwards, in the UI: each `BuyZone — ` workflow should show active/published. This n8n build
+separates draft from published — API activation normally publishes, and the script warns if the
+draft still differs; in that case click **Publish** on that workflow. Run *Test workflow* once on
+each and check the **Ingest** node output shows `"ok": true`; the first run seeds alert state, so
+no ntfy alerts fire until a later transition. Keep the old `BTC Buy-Zone Alerts` workflow active
+until the numbers are validated (below), then deactivate it yourself in the UI — the script never
+modifies it.
+
+Re-deploying after a change: edit `n8n/indicators.js` or a driver, `npm run build:n8n`, commit,
+then `python3 n8n/deploy.py` again — it updates the existing workflows in place.
 
 Requests per run: crypto = 1 (F&G) + 3 per asset; stocks/commodities = 1 (CNN) + 3 per asset,
 throttled to one Twelve Data call per 8 s (free tier: 8/min, 800/day → fine for ~25 symbols daily).
