@@ -124,6 +124,10 @@ no ntfy alerts fire until a later transition. Keep the old `BTC Buy-Zone Alerts`
 until the numbers are validated (below), then deactivate it yourself in the UI — the script never
 modifies it.
 
+Troubleshooting a run: `python3 n8n/diagnose.py` (read-only, same env file and tunnel) prints each
+`BuyZone — ` workflow's active/published state and its latest executions with the failing node, HTTP
+code and error body, plus the Ingest node's response on successful runs. `--workflow Swing` narrows it.
+
 Re-deploying after a change: edit `n8n/indicators.js` or a driver, `npm run build:n8n`, commit,
 then `python3 n8n/deploy.py` again — it updates the existing workflows in place.
 
