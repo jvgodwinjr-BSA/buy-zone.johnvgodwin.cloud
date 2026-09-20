@@ -68,7 +68,8 @@ run would have stored), and posts with `backfill: true` so alert state is never 
 
 **D17 — The score chart shows its inputs on the same 0–100 axis, never a second axis.** Fear & Greed and the
 2-week stochastic RSI are already 0–100 and are the hypothesis ("F&G ≤ 10 with the 2W stoch RSI at lows"), so
-they are the only extra lines; the price-distance components stay in the metrics table. Line colours were
+they were the only extra lines; the price-distance components stay in the metrics table. After the backfill
+John found the daily Fear & Greed line too noisy to read next to the score, so it was removed (PR #11): the chart
+is the score plus the 2W stoch RSI. The F&G value is still in the metrics table and the score's sentiment component. Line colours were
 validated with the dataviz palette checker against each other and the zone colours on the page surface (no
 further hue cleared the checks next to the red/yellow/green zone palette, which settled the two-line limit).
-A dashed line marks the F&G ≤ 10 deploy trigger.
