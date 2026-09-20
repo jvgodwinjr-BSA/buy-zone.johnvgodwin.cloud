@@ -106,6 +106,7 @@ n8n (VPS, cron in UTC)                                  Hostinger (buy-zone.john
 - `BASE_URL=… API_TOKEN=… node n8n/test/api.smoke.js` — end-to-end API/transition test (uses a
   throwaway `ZZTEST` asset; see README).
 - Local site: `php -S 127.0.0.1:8080 -t public` with MariaDB + `public/config.local.php`.
+- `python3 n8n/diagnose.py [--workflow Swing]` — read-only: latest executions per BuyZone workflow with the failing node/error.
 - `python3 n8n/deploy.py --list | --dry-run | (deploy)` — from a machine with SSH to the VPS;
   `python3 n8n/test/mock_n8n.py 15678` + `--no-tunnel --base-url http://127.0.0.1:15678` tests it here.
 

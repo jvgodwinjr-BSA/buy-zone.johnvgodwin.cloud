@@ -13,7 +13,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 KEY = 'testkey'
 ALLOWED_WF_KEYS = {'name', 'nodes', 'connections', 'settings', 'staticData'}
-DB = {'workflows': {}, 'credentials': {}}
+DB = {'workflows': {}, 'credentials': {}, 'executions': {}}
 
 
 def seed():
@@ -24,6 +24,21 @@ def seed():
     foreign = {'id': 'SECOPS1', 'name': 'SecOps – Alert triage', 'active': True, 'nodes': [], 'connections': {}, 'settings': {},
                'versionId': 'v1', 'activeVersionId': 'v1'}
     DB['workflows'] = {legacy['id']: legacy, foreign['id']: foreign}
+
+
+def seed_executions(wid):
+    fail = {'id': 'ex_fail_' + wid[:4], 'workflowId': wid, 'status': 'error', 'mode': 'trigger', 'startedAt': '2026-09-20T16:31:02.000Z', 'stoppedAt': '2026-09-20T16:31:03.000Z',
+            'data': {'resultData': {'lastNodeExecuted': 'Get Assets', 'error': {'message': 'The resource you are requesting could not be found', 'description': '{"error":"unauthorized"}', 'httpCode': '401', 'node': {'name': 'Get Assets'}},
+                     'runData': {'Config': [{'executionStatus': 'success', 'data': {'main': [[{'json': {'base_url': 'x'}}]]}}],
+                                 'Get Assets': [{'executionStatus': 'error', 'error': {'message': 'Authorization failed - please check your credentials', 'httpCode': '401'}}]}}}}
+    ok = {'id': 'ex_ok_' + wid[:4], 'workflowId': wid, 'status': 'success', 'mode': 'manual', 'startedAt': '2026-09-20T16:46:01.000Z', 'stoppedAt': '2026-09-20T16:46:04.000Z',
+          'data': {'resultData': {'lastNodeExecuted': 'Split Alerts',
+                   'runData': {'Get Assets': [{'executionStatus': 'success', 'data': {'main': [[{'json': {'body': {'assets': [{'symbol': 'BTC'}, {'symbol': 'ETH'}]}}}]]}}],
+                               'Split Assets': [{'executionStatus': 'success', 'data': {'main': [[{'json': {'symbol': 'BTC'}}, {'json': {'symbol': 'ETH'}}]]}}],
+                               'Ingest': [{'executionStatus': 'success', 'data': {'main': [[{'json': {'ok': True, 'stored': 4, 'alert_count': 0}}, {'json': {'ok': True, 'stored': 4, 'alert_count': 0}}]]}}],
+                               'Split Alerts': [{'executionStatus': 'success', 'data': {'main': [[]]}}]}}}}
+    DB['executions'][fail['id']] = fail
+    DB['executions'][ok['id']] = ok
 
 
 class H(BaseHTTPRequestHandler):
@@ -58,6 +73,16 @@ class H(BaseHTTPRequestHandler):
         if p.startswith('/api/v1/workflows/'):
             w = DB['workflows'].get(p.rsplit('/', 1)[1])
             return self.send(200, w) if w else self.send(404, {'message': 'not found'})
+        if p == '/api/v1/executions':
+            q = dict(kv.split('=') for kv in self.path.split('?')[1].split('&')) if '?' in self.path else {}
+            wid = q.get('workflowId')
+            if wid and not any(e['workflowId'] == wid for e in DB['executions'].values()):
+                seed_executions(wid)
+            data = [{k: e[k] for k in ('id', 'workflowId', 'status', 'mode', 'startedAt', 'stoppedAt')} for e in DB['executions'].values() if not wid or e['workflowId'] == wid]
+            return self.send(200, {'data': data[:int(q.get('limit', 10))], 'nextCursor': None})
+        if p.startswith('/api/v1/executions/'):
+            e = DB['executions'].get(p.rsplit('/', 1)[1])
+            return self.send(200, e) if e else self.send(404, {'message': 'not found'})
         self.send(404, {'message': 'not found'})
 
     def do_POST(self):
