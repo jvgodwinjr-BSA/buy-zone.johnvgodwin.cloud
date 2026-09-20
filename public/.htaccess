@@ -3,6 +3,11 @@
   RewriteEngine On
   RewriteCond %{HTTP:Authorization} .
   RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+  # When the document root is the repo root, this file replaces the repo-root rewrite rules for
+  # everything under public/, so the canonical redirect for direct /public/... requests lives here.
+  # THE_REQUEST is the browser's original request line, so internal rewrites are unaffected.
+  RewriteCond %{THE_REQUEST} \s/+public/ [NC]
+  RewriteRule ^(.*)$ /$1 [R=301,L]
   # Never serve the includes directly.
   RewriteRule ^includes/ - [F,L]
 </IfModule>
