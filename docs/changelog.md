@@ -4,6 +4,8 @@ Append a line per merged PR (newest first). Include the PR number and anything a
 (re-deploy n8n, re-import SQL, edit `config.local.php`).
 
 ## 2026-09-20
+- ADA (Cardano, `ADAUSDT`) added as the third crypto asset: SQL insert on the live DB + `db/seed.sql`;
+  backfill workflow re-run for its history.
 - PR #11 — Score-trend chart: Fear & Greed line and its trigger marker removed (too noisy to read on real
   data); the chart is the zone-coloured score plus the 2W stoch RSI.
 - PR #10 — Score-trend chart: 180-day default with a 48d/90d/180d/1y/2y/all selector, Fear & Greed and 2W
