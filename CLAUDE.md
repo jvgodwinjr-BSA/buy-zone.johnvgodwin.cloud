@@ -97,7 +97,8 @@ n8n (VPS, cron in UTC)                                  Hostinger (buy-zone.john
 - RSI: Wilder/RMA, SMA-seeded (`ta.rsi`). Stoch RSI: `sma(stoch(rsi,14),3)` = TV (14,14,3,3) %K.
 - 2-week closes: weekly candles aggregated on a Monday-anchored epoch grid (`stoch.anchor_offset`
   shifts it by a week if TV's 2W bars differ). 3d bars: daily candles on the epoch-day grid
-  (`setup_anchor_3d`). Validate BTC against TradingView after the first live run.
+  (`setup_anchor_3d`). Validated 2026-09-20 on BINANCE:BTCUSDT: 2W Stoch RSI %K, 1D SMA 200 and
+  EMA 21 matched TradingView exactly with both anchors at 0. Re-check only if a rule or anchor changes.
 - EMA is seeded with the SMA of the first n closes and run over all fetched history.
 
 ## Commands
