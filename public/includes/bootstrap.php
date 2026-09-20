@@ -11,6 +11,23 @@ if (!is_file($__local)) {
 }
 $CONFIG = array_replace_recursive(require __DIR__ . '/defaults.php', require $__local);
 
+// Uncaught exceptions become a short plain-text (or JSON, under /api/) 500 with a hint; the real
+// message goes to the server error log, never to the browser.
+set_exception_handler(function (Throwable $e): void {
+    error_log('[buyzone] ' . get_class($e) . ': ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
+    $hint = $e instanceof PDOException
+        ? 'Database error. Check the db settings in config.local.php and that db/schema.sql and db/seed.sql were imported. Details are in the server error log.'
+        : 'Server error. Details are in the server error log.';
+    http_response_code(500);
+    if (str_contains((string)($_SERVER['SCRIPT_NAME'] ?? ''), '/api/')) {
+        header('Content-Type: application/json');
+        echo json_encode(['error' => $hint]);
+    } else {
+        header('Content-Type: text/plain');
+        echo $hint, "\n";
+    }
+});
+
 function cfg(string $key, $default = null)
 {
     global $CONFIG;
