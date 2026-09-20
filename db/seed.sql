@@ -60,6 +60,7 @@ ON DUPLICATE KEY UPDATE config = VALUES(config), notes = VALUES(notes);
 INSERT INTO assets (symbol, display_name, asset_class, data_source, source_symbol, accum_profile_id, swing_enabled, is_active, sort_order) VALUES
 ('BTC',  'Bitcoin',              'crypto',    'binance',    'BTCUSDT', (SELECT id FROM scoring_profiles WHERE name='crypto_accum'),    1, 1, 10),
 ('ETH',  'Ethereum',             'crypto',    'binance',    'ETHUSDT', (SELECT id FROM scoring_profiles WHERE name='crypto_accum'),    1, 1, 20),
+('ADA',  'Cardano',              'crypto',    'binance',    'ADAUSDT', (SELECT id FROM scoring_profiles WHERE name='crypto_accum'),    1, 1, 30),
 -- Templates (inactive): flip is_active to 1 once a Twelve Data key is configured in n8n.
 ('AAPL', 'Apple',                'stock',     'twelvedata', 'AAPL',    (SELECT id FROM scoring_profiles WHERE name='stock_accum'),     0, 0, 100),
 ('GOLD', 'Gold (spot, XAU/USD)', 'commodity', 'twelvedata', 'XAU/USD', (SELECT id FROM scoring_profiles WHERE name='commodity_accum'), 0, 0, 200)

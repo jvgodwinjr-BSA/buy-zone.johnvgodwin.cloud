@@ -127,7 +127,7 @@ n8n (VPS, cron in UTC)                                  Hostinger (buy-zone.john
   `python3 n8n/test/mock_n8n.py 15678` + `--no-tunnel --base-url http://127.0.0.1:15678`.
 
 ## Current state (keep this accurate)
-- Assets live: BTC, ETH (crypto, swing-enabled). AAPL and GOLD are seeded inactive; activating stocks
+- Assets live: BTC, ETH, ADA (crypto, swing-enabled; ADA added 2026-09-20). AAPL and GOLD are seeded inactive; activating stocks
   or commodities needs a Twelve Data key first (`docs/runbooks.md` §2).
 - Hostinger: Git auto-deploy from `main`; document root is the repo root (`.htaccess` routes into
   `public/`); `/public/…` URLs still resolve on LiteSpeed — cosmetic, fixed by a doc-root change.
