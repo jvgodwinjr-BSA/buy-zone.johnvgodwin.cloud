@@ -1,13 +1,11 @@
 # Used when the subdomain's document root is the repo root instead of /public (the clean option is
-# still to point the document root at /public in hPanel). Everything that is not the site is blocked,
-# requests are routed into public/, and direct /public/... URLs are redirected to the clean path.
+# still to point the document root at /public in hPanel). Everything that is not the site is blocked
+# and requests are routed into public/. Direct /public/... requests are redirected to the clean path
+# by public/.htaccess, because a subdirectory .htaccess replaces these rules for that subtree.
 <IfModule mod_rewrite.c>
   RewriteEngine On
   RewriteRule ^(db|n8n|legacy|reference|\.git)(/|$) - [F,L]
   RewriteRule ^(CLAUDE\.md|README\.md|\.gitignore|package\.json)$ - [F,L]
-  # THE_REQUEST is the browser's original request line, so this ignores the internal rewrite below.
-  RewriteCond %{THE_REQUEST} \s/+public/ [NC]
-  RewriteRule ^public/(.*)$ /$1 [R=301,L]
   RewriteCond %{REQUEST_URI} !^/public/
   RewriteRule ^(.*)$ public/$1 [L]
 </IfModule>
