@@ -43,7 +43,7 @@ foreach ($swing['timeframes'] as $tf) {
         continue;
     }
     $chart = [
-        'labels' => array_map(fn($p) => gmdate('M j H:i', strtotime($p['period_start'] . ' UTC')), $series),
+        'times' => array_map(fn($p) => gmdate('c', strtotime($p['period_start'] . ' UTC')), $series),   // ISO UTC; app.js formats in local time
         'dist' => array_map(fn($p) => $p['dist21_pct'] === null ? null : (float)$p['dist21_pct'], $series),
         'states' => array_map('setup_state', $series),
     ];
