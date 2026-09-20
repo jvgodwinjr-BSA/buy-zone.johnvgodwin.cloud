@@ -147,14 +147,15 @@ Per timeframe the page builds one JSON payload from the 48-row series (nothing i
 
 ```php
 $chart = [
-  'labels' => gmdate('M j H:i', period_start),      // candle open, UTC
+  'times'  => gmdate('c', period_start),            // candle open as ISO 8601 UTC
   'dist'   => dist21_pct as float (null if missing),
   'states' => setup_state($row) for each row,       // setup | wait | below | none
 ];
 <canvas data-kind="swing" data-chart='…json…'>
 ```
 
-`swingChart` draws a Chart.js mixed chart with two datasets over the same 48 labels:
+`swingChart` formats each `times` entry in the viewer's local timezone with the same `localTime()` helper
+the badge table uses, then draws a Chart.js mixed chart with two datasets over those 48 labels:
 
 1. **Line** on the left axis: `dist` (% distance from the 21 EMA), light grey line, each point
    coloured by that candle's state, `spanGaps` so an insufficient-data candle leaves a hole rather
@@ -176,7 +177,7 @@ is price extending above the 21 EMA (no pullback yet); red is price under the 20
   **closed** candle that matches the final row's `period_start` (UTC). The live row moves with every tick.
 - `ta.sma(close, 200)` and `ta.ema(close, 21)` should match to the cent; `dist21_pct` is
   `(close − ema) / ema × 100`.
-- Chart x-axis labels are in **UTC**; the timestamps in the badge table are converted to the viewer's
-  local time by `app.js`. Keep that in mind when lining up a bar with the TradingView cursor.
+- Chart x-axis labels and the badge-table timestamps are both shown in the viewer's **local time**
+  (`app.js` converts the stored UTC instants); set TradingView to the same timezone when lining up a bar.
 - Each collector run happens one minute after the candle close, so a final row for 12:00 exists from
   12:16 (15m) and the 11:00 1h row from 12:01.

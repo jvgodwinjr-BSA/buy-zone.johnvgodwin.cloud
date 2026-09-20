@@ -4,6 +4,8 @@ Append a line per merged PR (newest first). Include the PR number and anything a
 (re-deploy n8n, re-import SQL, edit `config.local.php`).
 
 ## 2026-09-20
+- PR #8 — Swing chart x-axis labels shown in the viewer's local time (ISO timestamps from PHP, formatted
+  by the shared `localTime()` helper in `app.js`) so they match the badge table.
 - PR #7 — Documentation overhaul: `docs/` (environment, data model + report queries, API, runbooks,
   swing-page walkthrough, decision log, this changelog), PR template, `.claude/settings.json` read-only allowlist, `CLAUDE.md`
   restructured as an index of hard rules, README refreshed to the deployed reality.

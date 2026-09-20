@@ -1,8 +1,9 @@
-// Show stored UTC timestamps in the viewer's local timezone.
-document.querySelectorAll('time[datetime]').forEach(t => {
-  const d = new Date(t.getAttribute('datetime'));
-  if (!isNaN(d)) t.textContent = d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-});
+// Stored timestamps are UTC (ISO 8601); show them in the viewer's local timezone.
+function localTime(iso) {
+  const d = new Date(iso);
+  return isNaN(d) ? iso : d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+document.querySelectorAll('time[datetime]').forEach(t => { t.textContent = localTime(t.getAttribute('datetime')); });
 
 // Zone-banded score line (Investing detail page). data = { labels, scores, zones: [{min, color, zone}] }
 function scoreChart(el, data) {
@@ -39,7 +40,7 @@ function swingChart(el, data) {
   if (!window.Chart) return;
   const colors = { setup: '#2ecc71', wait: '#f1c40f', below: '#e74c3c', none: '#5f6368' };
   new Chart(el, {
-    data: { labels: data.labels, datasets: [
+    data: { labels: data.times.map(localTime), datasets: [
       { type: 'line', data: data.dist, yAxisID: 'y', borderColor: '#e8eaed', borderWidth: 1.5, pointRadius: 2.5, tension: 0.2, spanGaps: true,
         pointBackgroundColor: data.states.map(s => colors[s] || colors.none), pointBorderColor: data.states.map(s => colors[s] || colors.none) },
       { type: 'bar', data: data.states.map(() => 1), yAxisID: 'y2', backgroundColor: data.states.map(s => colors[s] || colors.none),
