@@ -11,10 +11,18 @@ function base_url(): string
 {
     static $b = null;
     if ($b === null) {
-        $dir = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? '/')), '/');
-        $b = preg_replace('#/(investing|swing|api)$#', '', $dir) ?? '';
+        $b = base_url_from((string)parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH));
     }
     return $b;
+}
+
+// Derived from the request path (what the browser sees), not SCRIPT_NAME, so links stay canonical
+// whether the document root is public/ or the repo root with .htaccess rewriting into public/.
+function base_url_from(string $requestPath): string
+{
+    $p = preg_replace('#/(investing|swing|api)(/[^/]*)?$#', '', $requestPath) ?? '';
+    $p = preg_replace('#/index\.php$#', '', $p) ?? '';
+    return rtrim($p, '/');
 }
 
 function page_head(string $title, string $active, bool $charts = false): void
