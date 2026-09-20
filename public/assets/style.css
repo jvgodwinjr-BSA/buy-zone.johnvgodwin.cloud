@@ -54,5 +54,9 @@ td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
 .meta { font-size: .75rem; color: var(--muted); margin-top: 8px; }
 
 .chart-box { position: relative; height: 260px; margin: 10px 0 4px; }
+.chart-box.tall { height: 340px; }
+.range { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 8px; }
+.range a { text-decoration: none; color: var(--muted); font-size: .78rem; padding: 3px 10px; border: 1px solid var(--border); border-radius: 999px; }
+.range a.on, .range a:hover { background: #2a2f36; color: var(--text); }
 .chart-legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: .75rem; color: var(--muted); margin-bottom: 8px; }
 .chart-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }

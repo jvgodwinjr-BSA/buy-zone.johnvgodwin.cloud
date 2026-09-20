@@ -11,6 +11,7 @@ require __DIR__ . '/../includes/alerts.php';
 //   setup row:        {type:"setup", symbol, timeframe, period_start, collected_at?, is_final, price, ma200, ema21,
 //                      above_200, ema_above_200, dist21_pct, mingling, spread_pct, compressed, setup_bool, insufficient_data?}
 // Rows are upserted on (asset, [timeframe,] period_start). Response: {ok, results:[...], alerts:[...]}.
+//   {"rows":[...], "backfill": true} stores historical rows without touching alert_state or sending alerts.
 
 require_api_token();
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
@@ -21,6 +22,7 @@ if (!is_array($body)) {
     json_out(['error' => 'invalid JSON body'], 400);
 }
 $rows = isset($body['rows']) && is_array($body['rows']) ? $body['rows'] : [$body];
+$backfill = !empty($body['backfill']);   // historical rows: store only, no transition rules
 if (!$rows || count($rows) > 500) {
     json_out(['error' => 'rows must contain 1..500 items'], 400);
 }
@@ -144,7 +146,7 @@ try {
                 ':ma_score' => $row['ma_score'], ':ema21' => $row['ema21'], ':vs_ema21_pct' => $row['vs_ema21_pct'], ':ema_score' => $row['ema_score'],
                 ':total_score' => $row['total_score'], ':zone' => $row['zone'], ':insufficient_data' => $row['insufficient_data'], ':source_payload' => $row['source_payload'],
             ]);
-            $new = alerts_for_accumulation($pdo, $asset, $row, $profileCfg);
+            $new = $backfill ? [] : alerts_for_accumulation($pdo, $asset, $row, $profileCfg);
         } else {
             $upSetup->execute([
                 ':asset_id' => (int)$asset['id'], ':timeframe' => $row['timeframe'], ':period_start' => $row['period_start'], ':collected_at' => $row['collected_at'],
@@ -153,7 +155,7 @@ try {
                 ':compressed' => $row['compressed'], ':setup_bool' => $row['setup_bool'], ':insufficient_data' => $row['insufficient_data'],
             ]);
             // Forming candles never drive alerts (candle-close rule); insufficient rows carry no verdict.
-            if ((int)$row['is_final'] === 1 && (int)$row['insufficient_data'] === 0) {
+            if (!$backfill && (int)$row['is_final'] === 1 && (int)$row['insufficient_data'] === 0) {
                 $scope = setup_scope_for((string)$row['timeframe']);
                 if ($scope !== null) {
                     $scopesToEval[$asset['id'] . '|' . $scope] = ['asset' => $asset, 'scope' => $scope, 'row' => $row];
@@ -176,4 +178,4 @@ try {
     $pdo->rollBack();
     json_out(['ok' => false, 'error' => 'storage failure: ' . $e->getMessage()], 500);
 }
-json_out(['ok' => true, 'stored' => count($results), 'results' => $results, 'alerts' => $alerts, 'alert_count' => count($alerts)]);
+json_out(['ok' => true, 'stored' => count($results), 'backfill' => $backfill, 'results' => $results, 'alerts' => $alerts, 'alert_count' => count($alerts)]);

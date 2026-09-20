@@ -155,3 +155,54 @@ test('computeSetupRows emits a final row for the last closed candle and a live r
   const closedOnly = I.computeSetupRows(bars, '15m', {}, t0 + 300 * 900e3 + 1);
   assert.equal(closedOnly.length, 1); assert.equal(closedOnly[0].is_final, 1);
 });
+
+test('computeAccumulationSeries: each point equals a live run truncated to that day; F&G by date; warm-up cap', () => {
+  const d0 = Date.UTC(2024, 0, 1); // a Monday
+  const N = 500;
+  const dailyBars = Array.from({ length: N }, (_, i) => ({ openTime: d0 + i * DAY, open: 1, high: 1, low: 1, close: 100 + 30 * Math.sin(i / 40) + 5 * Math.cos(i / 3), closeTime: d0 + (i + 1) * DAY - 1 }));
+  const weeklyBars = [];
+  for (let i = 0; i < N; i += 7) {
+    const wk = dailyBars.slice(i, i + 7);
+    weeklyBars.push({ openTime: wk[0].openTime, open: 1, high: 1, low: 1, close: wk[wk.length - 1].close, closeTime: wk[0].openTime + I.WEEK_MS - 1 });
+  }
+  const dateOf = b => new Date(b.openTime).toISOString().slice(0, 10);
+  const fng = {}; dailyBars.forEach((b, i) => { fng[dateOf(b)] = 5 + (i % 80); });
+  const cfg = Object.assign({ stoch: { group: 2 } }, CRYPTO_CFG);
+  const series = I.computeAccumulationSeries({ dailyBars, weeklyBars, fngByDate: fng, cfg, days: 100 });
+  assert.equal(series.length, 100);
+  assert.equal(series[0].date, dateOf(dailyBars[N - 100]));
+  // last point == the live computation on the full inputs (the last weekly bar is the forming week)
+  const last = series[series.length - 1];
+  const live = I.computeAccumulation({ dailyBars, weeklyBars, sentimentRaw: fng[last.date], cfg });
+  assert.equal(last.acc.score.total, live.score.total);
+  assert.equal(last.acc.stoch_rsi, live.stoch_rsi);
+  assert.equal(last.acc.ma200, live.ma200);
+  assert.equal(last.acc.ema21, live.ema21);
+  // a mid-week day (Tuesday): equals a live run that only knew bars up to that day, with the week's close = that day's close
+  const k = N - 2;
+  const p = series.find(s => s.period_start === dailyBars[k].openTime);
+  const truncW = weeklyBars.filter(b => b.openTime <= dailyBars[k].openTime).map(b => Object.assign({}, b));
+  truncW[truncW.length - 1].close = dailyBars[k].close;
+  const liveK = I.computeAccumulation({ dailyBars: dailyBars.slice(0, k + 1), weeklyBars: truncW, sentimentRaw: fng[p.date], cfg });
+  assert.equal(p.acc.score.total, liveK.score.total);
+  assert.equal(p.acc.stoch_rsi, liveK.stoch_rsi);
+  assert.equal(p.acc.sentiment_raw, fng[p.date]);
+  // a Sunday keeps the real weekly close (no substitution): still equals the truncated live run
+  const s = N - 4; // 2024-01-01 + 496 days is a Sunday
+  assert.equal(new Date(dailyBars[s].openTime).getUTCDay(), 0);
+  const ps = series.find(x => x.period_start === dailyBars[s].openTime);
+  const liveS = I.computeAccumulation({ dailyBars: dailyBars.slice(0, s + 1), weeklyBars: weeklyBars.filter(b => b.openTime <= dailyBars[s].openTime), sentimentRaw: fng[ps.date], cfg });
+  assert.equal(ps.acc.stoch_rsi, liveS.stoch_rsi);
+  // a date without a Fear & Greed entry renormalises instead of failing
+  const noFng = I.computeAccumulationSeries({ dailyBars, weeklyBars, fngByDate: {}, cfg, days: 3 });
+  assert.equal(noFng[0].acc.sentiment_raw, null);
+  assert.equal(noFng[0].acc.score.components.sentiment.used, false);
+  assert.equal(noFng[0].acc.score.weight_used, 60);
+  // warm-up cap: 250 bars -> 250 - 219 = 31 points at most
+  assert.equal(I.computeAccumulationSeries({ dailyBars: dailyBars.slice(0, 250), weeklyBars, fngByDate: fng, cfg, days: 730 }).length, 31);
+});
+
+test('parseFngHistory keys values by UTC date and skips junk', () => {
+  const m = I.parseFngHistory([{ value: '29', timestamp: String(Date.UTC(2026, 8, 19) / 1000) }, { value: 'x', timestamp: '1' }, { value: '50' }]);
+  assert.deepEqual(m, { '2026-09-19': 29 });
+});

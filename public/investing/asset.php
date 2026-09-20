@@ -17,18 +17,31 @@ if (!$asset) {
 }
 $cfg = $asset['config'];
 $cadence = cfg('cadence_seconds');
-$points = (int)cfg('chart_points', 48);
 $reading = latest_reading((int)$asset['id']);
-$series = daily_series((int)$asset['id'], $points);
+$sc = cfg('score_chart');
+$win = (string)($_GET['days'] ?? '');
+if (!in_array($win, $sc['options'], true)) {
+    $win = (string)$sc['default'];
+}
+$series = daily_series((int)$asset['id'], $win === 'all' ? 0 : (int)$win);
 $ltf = cfg('setup_scopes')['setup_ltf'];
 $setupRows = latest_setup_rows((int)$asset['id'], $ltf['timeframes']);
 $setupCollected = latest_setup_collected_at((int)$asset['id'], $ltf['timeframes']);
 [$verdict, $verdictTone] = setup_verdict($setupRows, $ltf['max_pair']);
 
+$spanDays = count($series) > 1 ? (strtotime(end($series)['period_start'] . ' UTC') - strtotime($series[0]['period_start'] . ' UTC')) / 86400 : 0;
+$labelFmt = $spanDays > 365 ? 'M j Y' : 'M j';
+$hasSentiment = ($cfg['sentiment_source'] ?? 'none') !== 'none';
+$col = fn(string $k) => array_map(fn($p) => $p[$k] === null ? null : (float)$p[$k], $series);
 $chart = [
-    'labels' => array_map(fn($p) => gmdate('M j', strtotime($p['period_start'] . ' UTC')), $series),
-    'scores' => array_map(fn($p) => $p['total_score'] === null ? null : (float)$p['total_score'], $series),
+    'labels' => array_map(fn($p) => gmdate($labelFmt, strtotime($p['period_start'] . ' UTC')), $series),
+    'scores' => $col('total_score'),
     'zones' => array_map(fn($z) => ['min' => (int)$z['min'], 'zone' => $z['zone'], 'color' => $z['color']], zones_with_colors($cfg)),
+    // the hypothesis inputs on the same 0-100 axis: the raw sentiment index and the raw 2W stoch RSI
+    'fng' => $hasSentiment ? $col('sentiment_raw') : null,
+    'fng_label' => ($cfg['sentiment_source'] ?? '') === 'cnn' ? 'CNN Fear & Greed' : 'Fear & Greed',
+    'fng_trigger' => $hasSentiment ? (int)cfg('fng_extreme_threshold', 10) : null,
+    'stoch' => $col('stoch_rsi'),
 ];
 
 page_head($asset['symbol'] . ' · Long-Term', 'investing', true);
@@ -39,7 +52,13 @@ echo '<h2 class="first">1 · Long-Term Accumulation (spot / DCA reserves)' . sta
 render_gauge($cfg, $reading);
 render_metrics_table($asset, $reading);
 
-echo '<h2>Score trend — last ' . $points . ' days</h2>';
+echo '<h2>Score trend — ' . ($win === 'all' ? 'all history' : 'last ' . (int)$win . ' days') . '</h2>';
+echo '<div class="range">';
+foreach ($sc['options'] as $o) {
+    $lbl = $o === 'all' ? 'all' : ((int)$o % 365 === 0 ? ((int)$o / 365) . 'y' : $o . 'd');
+    echo '<a href="?symbol=' . h(urlencode($asset['symbol'])) . '&amp;days=' . h($o) . '"' . ($o === $win ? ' class="on"' : '') . '>' . h($lbl) . '</a>';
+}
+echo '</div>';
 echo '<div class="chart-legend">';
 foreach (zones_with_colors($cfg) as $z) {
     echo '<span><i style="background:' . h($z['color']) . '"></i>' . h($z['zone']) . ' ≥ ' . (int)$z['min'] . '</span>';
@@ -48,8 +67,9 @@ echo '</div>';
 if (count($series) < 2) {
     echo '<p class="muted">Collecting history — the trend line appears once at least two days of readings exist.</p>';
 } else {
-    echo '<div class="chart-box"><canvas data-kind="score" data-chart=\'' . h(json_encode($chart, JSON_UNESCAPED_SLASHES)) . '\'></canvas></div>';
-    echo '<div class="muted" style="font-size:.75rem">One point per UTC day (the day\'s last reading). Every intraday reading is kept in the database.</div>';
+    echo '<div class="chart-box tall"><canvas data-kind="score" data-chart=\'' . h(json_encode($chart, JSON_UNESCAPED_SLASHES)) . '\'></canvas></div>';
+    echo '<div class="muted" style="font-size:.75rem">One point per UTC day (the day\'s last reading); every intraday reading is kept. The score is coloured by zone; the thin lines are the two hypothesis inputs on the same 0–100 scale'
+        . ($hasSentiment ? ', with the dashed line at the F&amp;G ≤ ' . (int)cfg('fng_extreme_threshold', 10) . ' deploy trigger' : '') . '. Click a legend entry to hide or show a line.</div>';
 }
 
 echo '<h2>2 · Trade Setup — 21 EMA + 200 MA (' . h(implode(' / ', array_map('strtoupper', $ltf['timeframes']))) . ')'

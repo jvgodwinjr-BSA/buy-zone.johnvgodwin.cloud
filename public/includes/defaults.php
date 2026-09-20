@@ -32,5 +32,7 @@ return [
     ],
 
     'fng_extreme_threshold' => 10,
-    'chart_points' => 48,
+    'chart_points' => 48,   // swing strips and overview sparklines (candles / days)
+    // Score-trend chart on the Investing asset page: selectable window in days ('all' = everything stored).
+    'score_chart' => ['default' => '180', 'options' => ['48', '90', '180', '365', '730', 'all']],
 ];

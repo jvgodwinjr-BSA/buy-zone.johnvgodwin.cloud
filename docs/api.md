@@ -29,6 +29,10 @@ Body: one row object, or `{"rows":[…]}` (1–500). The whole batch is validate
 bad nothing is stored and the response is `400 {"ok":false,"errors":[{"row":i,"error":"…"}]}`.
 Rows are stored in one transaction, then transition rules run once per affected asset+scope.
 
+`{"rows":[…], "backfill": true}` stores the rows and skips the transition rules entirely: `alert_state`
+and `alert_log` are untouched and the response carries `"backfill": true`. The manual backfill workflow
+uses it for historical days; never send live readings with the flag.
+
 ### Accumulation row
 ```json
 { "type": "accumulation", "symbol": "BTC", "period_start": 1758384000000, "collected_at": 1758384305000,

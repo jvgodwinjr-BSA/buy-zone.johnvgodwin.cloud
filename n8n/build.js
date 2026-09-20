@@ -2,7 +2,7 @@
 'use strict';
 // Generates n8n/workflows/*.n8n.json. Every Code node embeds indicators.js + drivers/_common.js +
 // its driver verbatim, so the math in n8n can never drift from the file in this repo.
-//   node n8n/build.js          # write the three workflow files
+//   node n8n/build.js          # write the workflow files
 //   node n8n/build.js --check  # exit 1 if the committed files are out of date
 const fs = require('fs');
 const path = require('path');
@@ -25,6 +25,7 @@ function node(name, type, typeVersion, parameters, pos, extra = {}) {
   return Object.assign({ parameters, id: uid(), name, type, typeVersion, position: pos }, extra);
 }
 const cron = expr => node('Schedule', 'n8n-nodes-base.scheduleTrigger', 1.2, { rule: { interval: [{ field: 'cronExpression', expression: expr }] } }, [0, 0]);
+const manual = () => node('Manual Trigger', 'n8n-nodes-base.manualTrigger', 1, {}, [0, 0]);
 const config = (pos, extraAssignments = []) => node('Config', 'n8n-nodes-base.set', 3.4, {
   assignments: { assignments: [
     { id: uid(), name: 'base_url', value: 'https://buy-zone.johnvgodwin.cloud', type: 'string' },
@@ -47,8 +48,9 @@ function http(name, url, pos, opts = {}) {
 const codeNode = (name, js, pos) => node(name, 'n8n-nodes-base.code', 2, { jsCode: js }, pos);
 
 const getAssets = (query, pos) => http('Get Assets', `={{ $('Config').first().json.base_url }}/api/assets.php${query}`, pos, { auth: 'httpHeaderAuth', options: fullResponse() });
-const ingest = pos => http('Ingest', `={{ $('Config').first().json.base_url }}/api/ingest.php`, pos, {
-  method: 'POST', auth: 'httpHeaderAuth', body: '={{ JSON.stringify({ rows: $json.rows }) }}', extra: continueOnFail,
+const ingest = (pos, opts = {}) => http('Ingest', `={{ $('Config').first().json.base_url }}/api/ingest.php`, pos, {
+  method: 'POST', auth: 'httpHeaderAuth', extra: continueOnFail,
+  body: opts.backfill ? '={{ JSON.stringify({ rows: $json.rows, backfill: true }) }}' : '={{ JSON.stringify({ rows: $json.rows }) }}',
 });
 const ntfy = pos => http('ntfy Push', `={{ $('Config').first().json.ntfy_url }}`, pos, {
   method: 'POST',
@@ -121,8 +123,27 @@ const stocks = workflow('BuyZone — Stocks & Commodities Collector', [
 ], chain(['Schedule', 'Config', 'Get Assets', 'Split Assets', 'CNN Fear & Greed', 'TD Daily', 'TD Weekly', 'TD 4h', 'Compute', 'Ingest', 'Split Alerts', 'ntfy Push']),
   'Runs at 21:30 UTC on weekdays (after the 16:00 ET close). Twelve Data nodes are throttled to one request per 8s (free tier: 8/min).');
 
+// Manual, run from the n8n UI: recomputes the accumulation gauge for the last `backfill_days` closed days of
+// every crypto asset (Binance daily + weekly candles, alternative.me Fear & Greed history) and stores the rows
+// with backfill:true, so alert_state is untouched. Re-run after adding a crypto asset to give it history.
+const backfill = workflow('BuyZone — Crypto Backfill (manual)', [
+  manual(),
+  config(X(1), [
+    { id: uid(), name: 'binance_base', value: 'https://api.binance.com', type: 'string' },
+    { id: uid(), name: 'backfill_days', value: 730, type: 'number' },
+  ]),
+  getAssets('?class=crypto', X(2)),
+  codeNode('Split Assets', code('split_assets.js', { __DATA_SOURCE__: 'binance' }), X(3)),
+  http('Fear & Greed History', 'https://api.alternative.me/fng/?limit=0', X(4), { options: fullResponse(), extra: continueOnFail }),
+  binance('Daily Klines', '1d', 1000, X(5)),
+  binance('Weekly Klines', '1w', 1000, X(6)),
+  codeNode('Compute', code('backfill.js'), X(7)),
+  ingest(X(8), { backfill: true }),
+], chain(['Manual Trigger', 'Config', 'Get Assets', 'Split Assets', 'Fear & Greed History', 'Daily Klines', 'Weekly Klines', 'Compute', 'Ingest']),
+  'Manual only (Execute workflow in the UI). Stores closed days only, never alerts. 1000 daily bars = ~730 days of points after the 220-bar warm-up.');
+
 const OUT = path.join(ROOT, 'workflows');
-const files = { 'crypto-longterm.n8n.json': crypto, 'swing-setup.n8n.json': swing, 'stocks-commodities.n8n.json': stocks };
+const files = { 'crypto-longterm.n8n.json': crypto, 'swing-setup.n8n.json': swing, 'stocks-commodities.n8n.json': stocks, 'crypto-backfill.n8n.json': backfill };
 const check = process.argv.includes('--check');
 let stale = 0;
 fs.mkdirSync(OUT, { recursive: true });
