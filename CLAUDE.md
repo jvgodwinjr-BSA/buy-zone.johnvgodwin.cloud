@@ -1,7 +1,7 @@
 # Buy-Zone Tracker (multi-asset)
 
-PHP/MySQL site on Hostinger (`https://buy-zone.johnvgodwin.cloud`) fed by three n8n workflows on
-John's shared VPS. It scores crypto, stocks and commodities on the "Crypto Lifer" trading framework
+PHP/MySQL site on Hostinger (`https://buy-zone.johnvgodwin.cloud`) fed by three scheduled n8n
+workflows (plus a manual backfill) on John's shared VPS. It scores crypto, stocks and commodities on the "Crypto Lifer" trading framework
 (synthesized from 17 videos, Jan–Jul 2026), stores every reading in MySQL, draws zone-colored trend
 charts and pushes ntfy alerts on state transitions. **An information tool — never an order router.**
 Live since 2026-09-20; successor to the single-file BTC dashboard in `legacy/`.
@@ -74,7 +74,8 @@ one = reduced, conflict = no trade. Exits on entry-timeframe closes (timeframe l
 | `setup_ltf` | 4h · 1d · 3d | 1d + 4h (3d is context) | `/investing/` | Crypto Long-Term `5 */4 * * *`; Stocks `30 21 * * 1-5` |
 | `setup_swing` | 15m · 1h | 15m + 1h | `/swing/` (crypto only) | Swing Setup `1,16,31,46 * * * *` |
 
-Scopes, max pairs, `alerts_enabled`, `cadence_seconds` and `chart_points` (48) are in
+Scopes, max pairs, `alerts_enabled`, `cadence_seconds`, `chart_points` (48, swing strips and sparklines)
+and `score_chart` (trend window: default 180 days, selector 48/90/180/365/730/all) are in
 `public/includes/defaults.php` (overridable from `config.local.php`).
 
 ### Alert rules (transition-only; state in `alert_state`; first observation seeds silently)
@@ -91,7 +92,8 @@ Scopes, max pairs, `alerts_enabled`, `cadence_seconds` and `chart_points` (48) a
 n8n (VPS, cron in UTC)                                  Hostinger (buy-zone.johnvgodwin.cloud)
   Crypto Long-Term  5 */4 * * *   Binance 1d/1w/4h  ──┐   GET  /api/assets.php  (bearer token)
   Swing Setup       1,16,31,46    Binance 15m/1h    ──┼── POST /api/ingest.php  (bearer token)
-  Stocks/Commod.    30 21 * * 1-5 Twelve Data + CNN ──┘        ├─ upsert readings / setup_readings
+  Stocks/Commod.    30 21 * * 1-5 Twelve Data + CNN ──┤        ├─ upsert readings / setup_readings
+  Crypto Backfill   manual (UI)   Binance 1d/1w + F&G ──┘        │  (backfill:true = store only, no alerts)
                                                                ├─ transition rules vs alert_state
         ntfy Push  ◄── alerts in the ingest response ──────────┘
   PHP pages read MySQL only.  Chart.js is vendored in public/assets/vendor.
@@ -129,7 +131,8 @@ n8n (VPS, cron in UTC)                                  Hostinger (buy-zone.john
   or commodities needs a Twelve Data key first (`docs/runbooks.md` §2).
 - Hostinger: Git auto-deploy from `main`; document root is the repo root (`.htaccess` routes into
   `public/`); `/public/…` URLs still resolve on LiteSpeed — cosmetic, fixed by a doc-root change.
-- n8n: the three `BuyZone — ` workflows are active; workflow and credential ids in `docs/environment.md`;
+- n8n: the three scheduled `BuyZone — ` workflows are active; `BuyZone — Crypto Backfill (manual)` is run
+  from the UI (runbook 11) after adding a crypto asset; ids in `docs/environment.md`;
   `n8n/deploy.env` and `n8n/.deploy-state.json` exist only on John's Mac.
 - Alerts: a public ntfy.sh topic (name in `deploy.env`), phone subscribed; nothing has transitioned yet.
 - Flow: work on a `claude/…` branch, open a PR to `main`, John merges, Hostinger deploys automatically.

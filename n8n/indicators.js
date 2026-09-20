@@ -167,12 +167,18 @@ function scoreProfile(values, cfg) {
   return { components: comps, total, zone: total == null ? null : zoneFor(total, cfg.zones), weight_used: ws };
 }
 
-function computeAccumulation(input) {
-  const { dailyBars, weeklyBars, sentimentRaw, cfg } = input;
-  const daily = dailyBars.map(b => b.close);
+// ---------- accumulation gauge ----------
+
+// 2-week closes from weekly bars on the Monday-anchored grid (the last bucket may still be forming).
+function twoWeekCloses(weeklyBars, cfg) {
+  const sc = (cfg && cfg.stoch) || {};
+  return aggregateBars(weeklyBars, sc.group || 2, WEEK_MS, WEEK_SHIFT_MS, sc.anchor_offset || 0).map(b => b.close);
+}
+
+// The gauge from ready-made close series: daily closes (last = current price) and 2W closes.
+function accumulationCore(daily, twoW, sentimentRaw, cfg) {
   if (daily.length < MIN_BARS) return { insufficient: true, bars: daily.length };
   const sc = cfg.stoch || {};
-  const twoW = aggregateBars(weeklyBars, sc.group || 2, WEEK_MS, WEEK_SHIFT_MS, sc.anchor_offset || 0).map(b => b.close);
   const st = stochRSI(twoW, sc.rsi_len || 14, sc.stoch_len || 14, sc.k_smooth || 3);
   const price = daily[daily.length - 1];
   const ma200 = sma(daily, 200), e21 = ema(daily, 21);
@@ -181,6 +187,44 @@ function computeAccumulation(input) {
   const score = scoreProfile({ sentiment, stoch: st ? st.k : null, ma200: vs200, ema21: vs21 }, cfg);
   return { insufficient: false, price, ma200, ema21: e21, vs_ma200_pct: vs200, vs_ema21_pct: vs21,
            stoch_rsi: st ? st.k : null, stoch: st, sentiment_raw: sentiment, score, bars: daily.length, bars_2w: twoW.length };
+}
+
+function computeAccumulation(input) {
+  const { dailyBars, weeklyBars, sentimentRaw, cfg } = input;
+  return accumulationCore(dailyBars.map(b => b.close), twoWeekCloses(weeklyBars, cfg), sentimentRaw, cfg);
+}
+
+// alternative.me /fng/?limit=0 entries { value, timestamp (unix seconds) } -> { 'YYYY-MM-DD': value }.
+function parseFngHistory(entries) {
+  const out = {};
+  for (const e of entries || []) {
+    const t = +e.timestamp, v = +e.value;
+    if (!Number.isFinite(t) || !Number.isFinite(v)) continue;
+    out[new Date(t * 1000).toISOString().slice(0, 10)] = v;
+  }
+  return out;
+}
+
+// Backfill: the gauge as it read at the close of each of the last `days` daily bars.
+// Day k uses daily bars[0..k]; its 2W series comes from the weekly bars that had opened by then, with the
+// week containing day k closed at day k's close (exactly what a live run sees mid-week); sentiment is that
+// date's Fear & Greed value (missing -> null -> renormalised, like a live outage). Needs MIN_BARS of
+// warm-up, so at most bars.length - MIN_BARS + 1 points come back.
+function computeAccumulationSeries(input) {
+  const { dailyBars, weeklyBars, fngByDate, cfg } = input;
+  const days = input.days || 730;
+  const out = [];
+  const start = Math.max(MIN_BARS - 1, dailyBars.length - days);
+  for (let k = start; k < dailyBars.length; k++) {
+    const day = dailyBars[k];
+    const wk = weeklyBars.filter(b => b.openTime <= day.openTime);
+    if (wk.length && wk[wk.length - 1].closeTime > day.closeTime) wk[wk.length - 1] = Object.assign({}, wk[wk.length - 1], { close: day.close });
+    const date = new Date(day.openTime).toISOString().slice(0, 10);
+    const sentiment = fngByDate && fngByDate[date] != null ? fngByDate[date] : null;
+    const daily = dailyBars.slice(0, k + 1).map(b => b.close);
+    out.push({ period_start: day.openTime, date, acc: accumulationCore(daily, twoWeekCloses(wk, cfg), sentiment, cfg) });
+  }
+  return out;
 }
 
 // One final row (last closed candle) + one live row (forming candle) per timeframe.
@@ -195,5 +239,5 @@ function computeSetupRows(bars, timeframe, cfg, now) {
 
 const Indicators = { DAY_MS, WEEK_MS, WEEK_SHIFT_MS, MIN_BARS, avg, sma, ema, rsiSeries, stochRSI, legacyWeeklyStochRSI,
   parseBinanceKlines, parseTwelveData, splitClosedForming, aggregateBars, tfSetup, ladder, zoneFor, scoreProfile,
-  computeAccumulation, computeSetupRows };
+  computeAccumulation, computeSetupRows, twoWeekCloses, accumulationCore, parseFngHistory, computeAccumulationSeries };
 if (typeof module !== 'undefined' && module.exports) module.exports = Indicators;

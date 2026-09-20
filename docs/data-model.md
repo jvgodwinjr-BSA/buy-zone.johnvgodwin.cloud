@@ -66,6 +66,11 @@ weights are renormalised.
 `ema21`/`vs_ema21_pct`/`ema_score`, `total_score`, `zone`, `insufficient_data`, `source_payload` (JSON
 debug: bar counts, stoch internals, F&G label). UNIQUE (`asset_id`, `period_start`).
 
+Backfilled days (runbook 11) are ordinary rows with `period_start` = 00:00 UTC of the day, `is_final = 1` and
+`source_payload.backfill = true`. The score-trend chart takes the last reading of each UTC day (`daily_series()`),
+so a day that also has live 4h rows shows the live one. The chart window is `score_chart` in
+`public/includes/defaults.php` (default 180 days; options 48 / 90 / 180 / 365 / 730 / all).
+
 ### `setup_readings` — badge panel, all timeframes
 `timeframe` (`15m`,`1h`,`4h`,`1d`,`3d`), `period_start`, `collected_at`, `is_final`, `price`, `ma200`,
 `ema21`, `above_200`, `ema_above_200`, `dist21_pct`, `mingling`, `spread_pct`, `compressed`,

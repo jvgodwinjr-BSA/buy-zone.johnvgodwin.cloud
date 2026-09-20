@@ -20,6 +20,9 @@ n8n collectors (cron, UTC)                     Hostinger
                                                             setup_readings, alert_state, alert_log
 ```
 
+A fourth, manual workflow (`BuyZone — Crypto Backfill (manual)`) rebuilds two years of daily gauge history
+through the same API (`docs/runbooks.md` §11).
+
 All indicator math lives in `n8n/indicators.js` and is embedded into the workflows by `n8n/build.js`;
 the site only reads the database. Weights, ladders and zone cutoffs are data (`scoring_profiles`).
 
@@ -91,7 +94,7 @@ cp n8n/deploy.env.example n8n/deploy.env     # N8N_API_KEY, SITE_API_TOKEN, NTFY
 TOPIC="buyzone-$(openssl rand -hex 6)"; sed -i '' "s#^NTFY_URL=.*#NTFY_URL=https://ntfy.sh/$TOPIC#" n8n/deploy.env; echo "$TOPIC"
 python3 n8n/deploy.py --list                 # read-only sanity check
 python3 n8n/deploy.py --dry-run              # plan
-python3 n8n/deploy.py                        # create/update + activate the three BuyZone — workflows
+python3 n8n/deploy.py                        # create/update + activate the BuyZone — workflows (manual backfill: saved only)
 python3 n8n/diagnose.py                      # after the next run: executions, failing node, Ingest response
 ```
 Subscribe the ntfy phone app to the topic; test with `curl -d test https://ntfy.sh/<topic>`. The

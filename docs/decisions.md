@@ -59,3 +59,16 @@ no third-party runtime dependency and renders in restricted networks.
 
 **D15 — No legacy cut-over.** The original `BTC Buy-Zone Alerts` workflow was never on this n8n
 instance, so nothing was deactivated; the old dashboard and workflow live in `legacy/` for reference only.
+
+**D16 — History is backfilled by a manual n8n workflow on the VPS, not by a script on a laptop.** Binance.com is
+geo-blocked from US IPs, so John's Mac cannot fetch the candles; the VPS already can. The workflow reuses the
+same embedded `indicators.js` (`computeAccumulationSeries`: for each past day, the 2W series is built from the
+weekly bars known by then with the running week closed at that day's close, so every point equals what a live
+run would have stored), and posts with `backfill: true` so alert state is never touched.
+
+**D17 — The score chart shows its inputs on the same 0–100 axis, never a second axis.** Fear & Greed and the
+2-week stochastic RSI are already 0–100 and are the hypothesis ("F&G ≤ 10 with the 2W stoch RSI at lows"), so
+they are the only extra lines; the price-distance components stay in the metrics table. Line colours were
+validated with the dataviz palette checker against each other and the zone colours on the page surface (no
+further hue cleared the checks next to the red/yellow/green zone palette, which settled the two-line limit).
+A dashed line marks the F&G ≤ 10 deploy trigger.

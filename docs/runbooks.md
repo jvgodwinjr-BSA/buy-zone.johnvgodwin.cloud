@@ -11,8 +11,10 @@ Step-by-step procedures. Anything touching n8n or the VPS runs from John's Mac (
    ```
    `source_symbol` is the Binance spot pair. `swing_enabled` 1 = also on the swing page.
 2. Nothing to deploy: the next collector runs pick it up (swing within 15 min, long-term within 4 h).
-   The card shows "waiting for first collector run" until then; the trend chart needs two days of readings.
-3. Fewer than ~600 days of Binance history → the 3d row shows "insufficient history" (harmless).
+   The card shows "waiting for first collector run" until then.
+3. Give it history: run the backfill once (runbook 11) so the score trend shows two years instead of
+   starting from today.
+4. Fewer than ~600 days of Binance history → the 3d row shows "insufficient history" (harmless).
 
 ## 2. Add a stock or commodity (first time: Twelve Data key)
 1. Get a key at twelvedata.com (free tier: 8 requests/min, 800/day; each symbol costs 3 requests per day).
@@ -50,7 +52,7 @@ Step-by-step procedures. Anything touching n8n or the VPS runs from John's Mac (
 ```bash
 python3 n8n/deploy.py --list        # every workflow on the instance (read-only)
 python3 n8n/deploy.py --dry-run     # what would change
-python3 n8n/deploy.py               # create/update + activate the three BuyZone workflows
+python3 n8n/deploy.py               # create/update + activate the BuyZone workflows (the manual backfill is saved, not activated)
 python3 n8n/diagnose.py             # latest executions, failing node + error, Ingest responses
 ```
 The scripts open their own SSH tunnel (local port 15678). They only ever write workflows named
@@ -102,3 +104,19 @@ The scripts open their own SSH tunnel (local port 15678). They only ever write w
 - New columns = migration SQL in `db/` (schema.sql updated too) and the API validation list in
   `public/api/ingest.php`.
 - Update `docs/data-model.md`, `docs/api.md`, this file, and `docs/changelog.md`.
+
+## 11. Backfill history (crypto)
+`BuyZone — Crypto Backfill (manual)` recomputes the accumulation gauge for the last 730 closed days of every
+active crypto asset with the same math as the live collector (Binance daily + weekly candles, alternative.me
+Fear & Greed history) and stores them through the ingest API with `backfill: true`, so nothing alerts and
+`alert_state` is untouched. Rows land with `period_start` = 00:00 UTC of each day and
+`source_payload.backfill = true`; a day that also has live 4h readings keeps showing the live one on the chart.
+
+1. Make sure the workflow exists: `python3 n8n/deploy.py --dry-run` lists it; deploy if it says "create".
+2. Tunnel + UI: `ssh -L 5678:127.0.0.1:5678 john@76.13.110.193`, open `http://127.0.0.1:5678`, open the
+   workflow, click **Execute workflow**. Expect ~1 minute; the Ingest node runs twice per asset (400-row chunks).
+3. Check: `https://buy-zone.johnvgodwin.cloud/investing/asset.php?symbol=BTC&days=all` shows the full history;
+   `python3 n8n/diagnose.py --workflow Backfill` shows the execution and the Ingest responses (`stored`, `backfill: true`).
+4. Safe to re-run at any time (upsert). Change the depth in the workflow's Config node (`backfill_days`, max ~780
+   with Binance's 1000-bar limit). Stocks and commodities are not covered: they need Twelve Data history and there
+   is no CNN Fear & Greed history endpoint.

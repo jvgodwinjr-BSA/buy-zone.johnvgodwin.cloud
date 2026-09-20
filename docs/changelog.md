@@ -4,6 +4,10 @@ Append a line per merged PR (newest first). Include the PR number and anything a
 (re-deploy n8n, re-import SQL, edit `config.local.php`).
 
 ## 2026-09-20
+- PR #10 — Score-trend chart: 180-day default with a 48d/90d/180d/1y/2y/all selector, Fear & Greed and 2W
+  stoch RSI lines on the same 0–100 axis, dashed F&G ≤ 10 trigger. New manual workflow
+  `BuyZone — Crypto Backfill (manual)` + ingest `backfill: true` flag (stores history, never alerts).
+  **Operator action:** `git pull && python3 n8n/deploy.py`, then Execute the backfill workflow once in the n8n UI.
 - PR #9 — Static assets are versioned by content hash (`asset_url()` in `render.php`): Hostinger's CDN
   caches `assets/*` for 7 days, which left browsers running the old `app.js` against the new swing chart
   payload from PR #8 (blank charts until a hard refresh). `swingChart` also accepts either payload key.

@@ -6,7 +6,7 @@ the VPS and opens a tunnel itself (python stdlib only, no pip installs).
 
   python3 n8n/deploy.py --list       read-only: every workflow's name, id, active flag
   python3 n8n/deploy.py --dry-run    show exactly what would be created/updated, write nothing
-  python3 n8n/deploy.py              create or update + activate the three "BuyZone — " workflows
+  python3 n8n/deploy.py              create or update + activate the "BuyZone — " workflows (manual-trigger ones are saved, not activated)
 
 Options: --env FILE (default n8n/deploy.env)   --no-tunnel   --base-url URL
 
@@ -26,7 +26,7 @@ import urllib.request
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 PREFIX = 'BuyZone — '
-WORKFLOW_FILES = ['crypto-longterm.n8n.json', 'swing-setup.n8n.json', 'stocks-commodities.n8n.json']
+WORKFLOW_FILES = ['crypto-longterm.n8n.json', 'swing-setup.n8n.json', 'stocks-commodities.n8n.json', 'crypto-backfill.n8n.json']
 STATE_FILE = os.path.join(ROOT, '.deploy-state.json')
 LEGACY_NAME_HINT = 'btc buy-zone'          # the original alerts workflow, read only (never modified)
 HEADER_AUTH_NODES = ['Get Assets', 'Ingest']
@@ -207,8 +207,9 @@ def upsert(api, state, dry, wf, existing_by_name):
         sys.exit(f'refusing to write a workflow not prefixed "{PREFIX}": {wf["name"]}')
     check_connections(wf)
     cur = existing_by_name.get(wf['name'])
+    manual = any(n.get('type') == 'n8n-nodes-base.manualTrigger' for n in wf.get('nodes', []))
     if dry:
-        log(f'  {wf["name"]}: would {"update id " + cur["id"] if cur else "create"} and activate')
+        log(f'  {wf["name"]}: would {"update id " + cur["id"] if cur else "create"}' + (' (manual trigger: saved, not activated)' if manual else ' and activate'))
         return
     if cur:
         if cur.get('active'):
@@ -220,6 +221,9 @@ def upsert(api, state, dry, wf, existing_by_name):
         log(f'  {wf["name"]}: created id {saved["id"]}')
     state['workflows'][wf['name']] = saved['id']
     save_state(state)
+    if manual:
+        log(f'  {wf["name"]}: manual trigger — run it from the n8n UI (open the workflow, Execute workflow)')
+        return saved
     act = api.call('POST', f'/workflows/{saved["id"]}/activate')
     fresh = api.call('GET', f'/workflows/{saved["id"]}')
     ver = fresh.get('versionId')

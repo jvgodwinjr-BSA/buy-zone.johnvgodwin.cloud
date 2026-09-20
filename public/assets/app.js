@@ -5,11 +5,23 @@ function localTime(iso) {
 }
 document.querySelectorAll('time[datetime]').forEach(t => { t.textContent = localTime(t.getAttribute('datetime')); });
 
-// Zone-banded score line (Investing detail page). data = { labels, scores, zones: [{min, color, zone}] }
+// Zone-banded score line + the inputs behind it (Investing detail page), all on one 0-100 axis.
+// data = { labels, scores, zones: [{min, color, zone}], fng|null, fng_label, fng_trigger|null, stoch }
+// Validated with the dataviz palette checker on the page surface (#0e1116) against each other and the zone colours.
+const INPUT_COLORS = { fng: '#3987e5', stoch: '#c94fb0' };
 function scoreChart(el, data) {
   if (!window.Chart) return;
   const zones = data.zones.slice().sort((a, b) => a.min - b.min);
   const colorFor = v => { let c = zones[0].color; for (const z of zones) if (v >= z.min) c = z.color; return c; };
+  const dense = data.scores.length > 90;
+  const thin = (label, values, color, hidden) => ({ label, data: values, borderColor: color, backgroundColor: color, borderWidth: 1.5, pointRadius: 0,
+    pointHitRadius: 8, tension: 0.2, spanGaps: true, hidden: !!hidden });
+  const datasets = [{ label: 'Score', data: data.scores, borderColor: '#e8eaed', backgroundColor: '#e8eaed', borderWidth: 2.5, pointRadius: dense ? 0 : 3,
+    pointHitRadius: 8, tension: 0.25, spanGaps: true,
+    pointBackgroundColor: ctx => colorFor(ctx.parsed.y), pointBorderColor: ctx => colorFor(ctx.parsed.y),
+    segment: { borderColor: ctx => colorFor(ctx.p1.parsed.y) } }];
+  const fngIdx = data.fng ? datasets.push(thin(data.fng_label || 'Fear & Greed', data.fng, INPUT_COLORS.fng)) - 1 : -1;
+  if (data.stoch) datasets.push(thin('2W Stoch RSI', data.stoch, INPUT_COLORS.stoch));
   const bands = {
     id: 'bands',
     beforeDraw(chart) {
@@ -20,17 +32,26 @@ function scoreChart(el, data) {
         const bottom = y.getPixelForValue(z.min);
         ctx.save(); ctx.globalAlpha = 0.10; ctx.fillStyle = z.color; ctx.fillRect(a.left, top, a.right - a.left, bottom - top); ctx.restore();
       });
+      if (data.fng_trigger != null && fngIdx >= 0 && chart.isDatasetVisible(fngIdx)) {   // the F&G <= 10 deploy trigger
+        const yy = y.getPixelForValue(data.fng_trigger);
+        ctx.save(); ctx.strokeStyle = INPUT_COLORS.fng; ctx.fillStyle = INPUT_COLORS.fng; ctx.globalAlpha = 0.8; ctx.lineWidth = 1; ctx.setLineDash([4, 4]);
+        ctx.beginPath(); ctx.moveTo(a.left, yy); ctx.lineTo(a.right, yy); ctx.stroke();
+        ctx.setLineDash([]); ctx.font = '11px -apple-system, Segoe UI, Roboto, sans-serif'; ctx.textAlign = 'left';
+        const label = 'F&G \u2264 ' + data.fng_trigger + ' deploy trigger', tw = ctx.measureText(label).width;
+        ctx.globalAlpha = 0.85; ctx.fillStyle = '#0e1116'; ctx.fillRect(a.left + 2, yy - 16, tw + 8, 14);   // keep the label readable over the lines
+        ctx.globalAlpha = 1; ctx.fillStyle = INPUT_COLORS.fng; ctx.fillText(label, a.left + 6, yy - 5);
+        ctx.restore();
+      }
     },
   };
   new Chart(el, {
     type: 'line',
-    data: { labels: data.labels, datasets: [{ data: data.scores, borderWidth: 2, pointRadius: 3, tension: 0.25, spanGaps: true,
-      pointBackgroundColor: ctx => colorFor(ctx.parsed.y), pointBorderColor: ctx => colorFor(ctx.parsed.y),
-      segment: { borderColor: ctx => colorFor(ctx.p1.parsed.y) } }] },
-    options: { responsive: true, maintainAspectRatio: false, animation: false,
-      plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => `score ${c.parsed.y}` } } },
+    data: { labels: data.labels, datasets },
+    options: { responsive: true, maintainAspectRatio: false, animation: false, interaction: { mode: 'index', intersect: false },
+      plugins: { legend: { display: true, position: 'bottom', labels: { color: '#9aa0a6', boxWidth: 18, boxHeight: 2, usePointStyle: false, padding: 14 } },
+                 tooltip: { callbacks: { label: c => `${c.dataset.label}: ${c.parsed.y == null ? '\u2014' : Math.round(c.parsed.y * 10) / 10}` } } },
       scales: { y: { min: 0, max: 100, ticks: { color: '#9aa0a6', stepSize: 20 }, grid: { color: '#2a2f36' } },
-                x: { ticks: { color: '#9aa0a6', maxTicksLimit: 8 }, grid: { display: false } } } },
+                x: { ticks: { color: '#9aa0a6', maxTicksLimit: 8, maxRotation: 0 }, grid: { display: false } } } },
     plugins: [bands],
   });
 }
